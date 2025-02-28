@@ -23,8 +23,10 @@ type MirrorOptions struct {
 	OriginalDestination          string
 	DestinationRegistry          string
 	DestinationTlsVerify         bool
+	SourceTlsVerify              bool
 	GenerateV1DestTags           bool
 	WorkingDir                   string
+	Workspace                    string
 	GraphImage                   string
 	Releases                     []string
 	ConfigPath                   string
@@ -69,7 +71,6 @@ type MirrorOptions struct {
 	DigestFile                   string    // Write digest to this file
 	Format                       string    // Force conversion of the image to a specified format
 	All                          bool      // Copy all of the images if the source is a list
-	EncryptLayer                 []int     // The list of layers to encrypt
 	EncryptionKeys               []string  // Keys needed to encrypt the image
 	DecryptionKeys               []string  // Keys needed to decrypt the image
 	IsDryRun                     bool      // generates a mappings.txt without performing the mirroring
@@ -77,26 +78,13 @@ type MirrorOptions struct {
 	UUID                         uuid.UUID // set uuid
 	ImageType                    string    // release, catalog-operator, additionalImage
 	Stdout                       io.Writer
-	DeprecatedTLSVerify          bool
 	RetryOpts                    *retry.Options
-	deprecatedTLSVerify          bool   // May be shared across several imageOptions instances, or nil.
 	authFilePath                 string // Path to a */containers/auth.json (prefixed version to override shared image option).
-	credsOption                  string // username[:password] for accessing a registry
-	userName                     string // username for accessing a registry
-	password                     string // password for accessing a registry
-	registryToken                string // token to be used directly as a Bearer token when accessing the registry
 	dockerCertPath               string // A directory using Docker-like *.{crt,cert,key} files for connecting to a registry or a daemon
-	TlsVerify                    bool   // Require HTTPS and verify certificates (for docker: and docker-daemon:)
-	noCreds                      bool   // Access the registry anonymously
 	sharedBlobDir                string // A directory to use for OCI blobs, shared across repositories
 	dockerDaemonHost             string // docker-daemon: host to connect to
-	dirForceCompression          bool   // Compress layers when saving to the dir: transport
-	dirForceDecompression        bool   // Decompress layers when saving to the dir: transport
-	ociAcceptUncompressedLayers  bool   // Whether to accept uncompressed layers in the oci: transport
-	compressionFormat            string // Format to use for the compression
-	compressionLevel             int    // Level to use for the compression
-	precomputeDigests            bool   // Precompute digests to dedup layers when saving to the docker: transport
 	RegistryLogFile              *os.File
+	WithV1Tags                   bool
 }
 
 const defaultUserAgent string = "oc-mirror"
@@ -140,20 +128,20 @@ func (opts MirrorOptions) CommandTimeoutContext() (context.Context, context.Canc
 // It is guaranteed to return a fresh instance, so it is safe to make additional updates to it.
 func (opts MirrorOptions) NewSystemContext() *types.SystemContext {
 	ctx := &types.SystemContext{
-		RegistriesDirPath:        opts.RegistriesDirPath,
-		ArchitectureChoice:       opts.OverrideArch,
-		OSChoice:                 opts.OverrideOS,
-		VariantChoice:            opts.OverrideVariant,
-		SystemRegistriesConfPath: opts.RegistriesConfPath,
-		BigFilesTemporaryDir:     opts.TmpDir,
-		DockerRegistryUserAgent:  defaultUserAgent,
-		DockerCertPath:           opts.dockerCertPath,
-		OCISharedBlobDirPath:     opts.sharedBlobDir,
-		AuthFilePath:             opts.authFilePath,
-		DockerDaemonHost:         opts.dockerDaemonHost,
-		DockerDaemonCertPath:     opts.dockerCertPath,
+		RegistriesDirPath:           opts.RegistriesDirPath,
+		ArchitectureChoice:          opts.OverrideArch,
+		OSChoice:                    opts.OverrideOS,
+		VariantChoice:               opts.OverrideVariant,
+		SystemRegistriesConfPath:    opts.RegistriesConfPath,
+		BigFilesTemporaryDir:        opts.TmpDir,
+		DockerRegistryUserAgent:     defaultUserAgent,
+		DockerCertPath:              opts.dockerCertPath,
+		OCISharedBlobDirPath:        opts.sharedBlobDir,
+		AuthFilePath:                opts.authFilePath,
+		DockerDaemonHost:            opts.dockerDaemonHost,
+		DockerDaemonCertPath:        opts.dockerCertPath,
+		DockerInsecureSkipTLSVerify: types.NewOptionalBool(!opts.DestinationTlsVerify),
 	}
-
 	return ctx
 }
 
@@ -187,21 +175,21 @@ func (o MirrorOptions) IsTerminal() bool {
 }
 
 func (o MirrorOptions) IsMirrorToDisk() bool {
-	return o.Mode == "m2d"
+	return o.Mode == mirrorToDisk
 }
 
 func (o MirrorOptions) IsMirrorToMirror() bool {
-	return o.Mode == "m2m"
+	return o.Mode == mirrorToMirror
 }
 
 func (o MirrorOptions) IsDiskToMirror() bool {
-	return o.Mode == "d2m"
+	return o.Mode == diskToMirror
 }
 
 func (o MirrorOptions) IsDelete() bool {
-	return o.Function == "delete"
+	return o.Function == deleteFunction
 }
 
 func (c MirrorOptions) IsCopy() bool {
-	return c.Function == "copy"
+	return c.Function == mirrorFunction
 }

@@ -189,14 +189,8 @@ func Check(ctx context.Context, image string, opts *common.MirrorOptions, asCopy
 	var sysCtx *types.SystemContext
 	if asCopySrc {
 		sysCtx = opts.NewSystemContext()
-		//if err != nil {
-		//	return false, err
-		//}
 	} else {
 		sysCtx = opts.NewSystemContext()
-		//if err != nil {
-		//	return false, err
-		//}
 	}
 
 	ctx, cancel := opts.CommandTimeoutContext()

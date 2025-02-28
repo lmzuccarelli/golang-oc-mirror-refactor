@@ -32,4 +32,7 @@ const (
 	limitOverallParallelDownloads uint   = 200
 	mirrorCmd                     string = "mirror"
 	deleteCmd                     string = "delete"
+	mirrorToDisk                  string = "mirror-to-disk"
+	diskToMirror                  string = "disk-to-mirror"
+	mirrorToMirror                string = "mirror-to-mirror"
 )

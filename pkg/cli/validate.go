@@ -3,7 +3,6 @@ package cli
 import (
 	"fmt"
 	"path"
-	"slices"
 	"strings"
 	"time"
 
@@ -40,35 +39,29 @@ func (o Validate) CheckArgs(args []string) error {
 		return fmt.Errorf("use the --config flag it is mandatory")
 	}
 
-	err := SetDestination(args, o.Options)
+	err := setModeAndDestination(args, o.Options)
 	if err != nil {
 		return err
 	}
 
-	if strings.Contains(o.Options.OriginalDestination, dockerProtocol) && o.Options.WorkingDir != "" && o.Options.From != "" {
-		return fmt.Errorf("when destination is docker://, --from (assumes disk to mirror workflow) and --workspace (assumes mirror to mirror workflow) cannot be used together")
-	}
-	if strings.Contains(o.Options.OriginalDestination, dockerProtocol) && o.Options.WorkingDir == "" && o.Options.From == "" {
-		return fmt.Errorf("when destination is docker://, either --from (assumes disk to mirror workflow) or --workspace (assumes mirror to mirror workflow) need to be provided")
-	}
-	if strings.Contains(o.Options.OriginalDestination, fileProtocol) || strings.Contains(o.Options.OriginalDestination, dockerProtocol) {
-	} else {
-		return fmt.Errorf("destination must have either file:// (mirror to disk) or docker:// (diskToMirror) protocol prefixes")
-	}
-
-	SetMode(args, o.Options)
+	/*
+		if strings.Contains(o.Options.OriginalDestination, dockerProtocol) && o.Options.WorkingDir != "" && o.Options.From != "" {
+			return fmt.Errorf("when destination is docker://, --from (assumes disk to mirror workflow) and --workspace (assumes mirror to mirror workflow) cannot be used together")
+		}
+		if strings.Contains(o.Options.OriginalDestination, dockerProtocol) && o.Options.WorkingDir == "" && o.Options.From == "" {
+			return fmt.Errorf("when destination is docker://, either --from (assumes disk to mirror workflow) or --workspace (assumes mirror to mirror workflow) need to be provided")
+		}
+		if strings.Contains(o.Options.OriginalDestination, fileProtocol) || strings.Contains(o.Options.OriginalDestination, dockerProtocol) {
+		} else {
+			return fmt.Errorf("destination must have either file:// (mirror to disk) or docker:// (diskToMirror) protocol prefixes")
+		}
+	*/
 
 	// OCPBUGS-42862
 	if strings.Contains(o.Options.OriginalDestination, fileProtocol) && o.Options.From == "" {
 		if keyWord := checkKeyWord(keyWords, o.Options.OriginalDestination); len(keyWord) > 0 {
 			return fmt.Errorf("the destination contains an internal oc-mirror keyword '%s'", keyWord)
 		}
-		o.Options.WorkingDir = path.Join(o.Options.Destination, workingDir)
-		o.Options.Mode = "m2d"
-		o.Options.MultiArch = "system"
-	}
-	if len(o.Options.From) > 0 && !strings.Contains(o.Options.From, fileProtocol) {
-		return fmt.Errorf("when --from is used, it must have file:// prefix")
 	}
 	if len(o.Options.From) > 0 && o.Options.SinceString != "" {
 		o.Log.Warn("since flag is only taken into account during mirrorToDisk workflow")
@@ -85,6 +78,8 @@ func (o Validate) CheckArgs(args []string) error {
 			return fmt.Errorf("--since flag needs to be in format yyyy-MM-dd")
 		}
 	}
+	o.Options.MultiArch = "system"
+	o.Options.RemoveSignatures = true
 	return nil
 }
 
@@ -97,33 +92,58 @@ func checkKeyWord(key_words []string, check string) string {
 	return ""
 }
 
-func SetDestination(args []string, opts *common.MirrorOptions) error {
-	if slices.Contains(args, fileProtocol) && slices.Contains(args, dockerProtocol) {
-		return fmt.Errorf("you can't have both file:// and docker:// as destination settings")
-	}
-	for _, arg := range args {
-		if strings.Contains(arg, fileProtocol) {
-			opts.Destination = strings.TrimPrefix(arg, fileProtocol)
-			opts.OriginalDestination = arg
+func setModeAndDestination(args []string, opts *common.MirrorOptions) error {
+	if opts.From != "" && opts.Workspace == "" {
+		if !strings.Contains(opts.From, fileProtocol) {
+			return fmt.Errorf("when using --from it must have a file:// prefix (disk-to-mirror)")
 		}
-		if strings.Contains(arg, dockerProtocol) {
-			opts.Destination = strings.TrimPrefix(arg, dockerProtocol)
-			opts.OriginalDestination = arg
+		dest, ok := argsContain(args, dockerProtocol)
+		if ok {
+			opts.Mode = diskToMirror
+			opts.WorkingDir = path.Join(strings.TrimPrefix(opts.From, fileProtocol), "working-dir")
+			opts.Destination = dest
+			opts.OriginalDestination = dest
+			opts.DestinationRegistry = strings.TrimPrefix(dest, dockerProtocol)
+		} else {
+			return fmt.Errorf("when using --from ensure the destination has a docker:// prefix (disk-to-mirror)")
+		}
+	}
+	if opts.From == "" && opts.Workspace == "" {
+		dest, ok := argsContain(args, fileProtocol)
+		if ok {
+			opts.Mode = mirrorToDisk
+			opts.WorkingDir = path.Join(strings.TrimPrefix(dest, fileProtocol), "working-dir")
+			opts.Destination = strings.TrimPrefix(dest, fileProtocol)
+			opts.OriginalDestination = dest
+		} else {
+			return fmt.Errorf("ensure destination has a file:// prefix (mirror-to-disk)")
+		}
+	}
+	if opts.From == "" && opts.Workspace != "" {
+		if strings.Contains(opts.Workspace, fileProtocol) {
+			dest, ok := argsContain(args, dockerProtocol)
+			if ok {
+				opts.Mode = mirrorToMirror
+				opts.WorkingDir = path.Join(strings.TrimPrefix(opts.Workspace, fileProtocol), "working-dir")
+				opts.Destination = dest
+				opts.OriginalDestination = dest
+				opts.DestinationRegistry = strings.TrimPrefix(dest, dockerProtocol)
+			} else {
+				return fmt.Errorf("ensure the destination has a docker:// prefix (mirror-to-mirror)")
+			}
+		} else {
+			return fmt.Errorf("when using the --workspace flag ensure it has a file:// prefix (mirror-to-mirror)")
 		}
 	}
 	return nil
 }
 
-func SetMode(args []string, opts *common.MirrorOptions) {
-	if opts.From != "" && slices.Contains(args, dockerProtocol) {
-		opts.Mode = "d2m"
-		opts.WorkingDir = strings.Split(opts.Destination, dockerProtocol)[1]
+// utility helper function
+func argsContain(args []string, value string) (string, bool) {
+	for _, arg := range args {
+		if strings.Contains(arg, value) {
+			return arg, true
+		}
 	}
-	if opts.From == "" && slices.Contains(args, fileProtocol) {
-		opts.Mode = "m2d"
-		opts.WorkingDir = strings.Split(opts.Destination, fileProtocol)[1]
-	}
-	if opts.WorkingDir != "" && opts.From == "" && slices.Contains(args, dockerProtocol) {
-		opts.Mode = "m2m"
-	}
+	return "", false
 }

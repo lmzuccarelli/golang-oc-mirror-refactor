@@ -13,35 +13,28 @@ import (
 	"github.com/lmzuccarelli/golang-oc-mirror-refactor/pkg/common"
 	"github.com/lmzuccarelli/golang-oc-mirror-refactor/pkg/config"
 	"github.com/lmzuccarelli/golang-oc-mirror-refactor/pkg/emoji"
+	"github.com/lmzuccarelli/golang-oc-mirror-refactor/pkg/helm"
 	clog "github.com/lmzuccarelli/golang-oc-mirror-refactor/pkg/log"
 	"github.com/lmzuccarelli/golang-oc-mirror-refactor/pkg/mirror"
+	"github.com/lmzuccarelli/golang-oc-mirror-refactor/pkg/operator"
 	"github.com/lmzuccarelli/golang-oc-mirror-refactor/pkg/release"
 )
 
-type ExecuteFlowControllerInterface interface {
-	MirrorProcess(args []string) error
-	DeleteProcess(args []string) error
-}
-
-type ExecuteFlowController struct {
+type MirrorFlowController struct {
 	Log     clog.PluggableLoggerInterface
 	Options *common.MirrorOptions
 	Context context.Context
 }
 
-func NewExecuteFlowController(ctx context.Context, log clog.PluggableLoggerInterface, opts *common.MirrorOptions) ExecuteFlowControllerInterface {
-	return ExecuteFlowController{
+func NewMirrorFlowController(ctx context.Context, log clog.PluggableLoggerInterface, opts *common.MirrorOptions) FlowControllerInterface {
+	return MirrorFlowController{
 		Context: ctx,
 		Log:     log,
 		Options: opts,
 	}
 }
 
-func (o ExecuteFlowController) DeleteProcess(args []string) error {
-	return nil
-}
-
-func (o ExecuteFlowController) MirrorProcess(args []string) error {
+func (o MirrorFlowController) Process(args []string) error {
 	validate := Validate{Log: o.Log, Options: o.Options}
 	err := validate.CheckArgs(args)
 	if err != nil {
@@ -74,12 +67,26 @@ func (o ExecuteFlowController) MirrorProcess(args []string) error {
 		return err
 	}
 
+	if o.Options.IsDiskToMirror() {
+		// extract the archive
+		extractor, err := archive.NewArchiveExtractor(o.Options.Destination, o.Options.WorkingDir, o.Options.LocalStorageDisk)
+		err = extractor.Unarchive()
+		if err != nil {
+			o.Log.Error(" %v ", err)
+			return err
+		}
+	}
+
 	mirror := mirror.New(o.Context, o.Log, cfg.(v2alpha1.ImageSetConfiguration), o.Options)
 	collectManager := collector.New(o.Context, o.Log, cfg.(v2alpha1.ImageSetConfiguration), o.Options)
 	release := release.New(o.Context, o.Log, mirror, cfg.(v2alpha1.ImageSetConfiguration), o.Options)
 	additional := additional.New(o.Context, o.Log, cfg.(v2alpha1.ImageSetConfiguration), o.Options)
+	operator := operator.New(o.Context, o.Log, mirror, cfg.(v2alpha1.ImageSetConfiguration), o.Options)
+	helm := helm.New(o.Context, o.Log, cfg.(v2alpha1.ImageSetConfiguration), o.Options)
 	collectManager.AddCollector(release)
 	collectManager.AddCollector(additional)
+	collectManager.AddCollector(operator)
+	collectManager.AddCollector(helm)
 	allImages, err := collectManager.CollectAllImages()
 	if err != nil {
 		return err
@@ -89,6 +96,7 @@ func (o ExecuteFlowController) MirrorProcess(args []string) error {
 
 	localStorage := LocalStorage{Log: o.Log, Options: o.Options, Context: o.Context}
 	localStorage.Setup()
+
 	go localStorage.StartLocalRegistry()
 
 	// batch all images
@@ -98,6 +106,7 @@ func (o ExecuteFlowController) MirrorProcess(args []string) error {
 	if err != nil {
 		return err
 	}
+
 	if o.Options.IsMirrorToDisk() {
 		maxSize := cfg.(v2alpha1.ImageSetConfiguration).ImageSetConfigurationSpec.ArchiveSize
 		archiver, err := archive.NewPermissiveMirrorArchive(o.Options, o.Log, maxSize)

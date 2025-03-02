@@ -65,8 +65,29 @@ func Execute() error {
 	deleteCmd.BoolVar(&options.DeleteGenerate, "generate", false, "Used to generate the delete yaml for the list of manifests and blobs , used in the step to actually delete from local cahce and remote registry")
 	deleteCmd.BoolVar(&options.DeleteV1, "delete-v1-images", false, "Used during the migration, along with --generate, in order to target images previously mirrored with oc-mirror v1")
 
+	usage := `
+	usage: oc-mirror -c <image set configuration path> [--from | --workspace] <destination prefix>:<destination location> --v2
+
+	Command Line Examples 
+
+	# Mirror To Disk
+	oc-mirror -c ./isc.yaml file:///home/<user>/oc-mirror/mirror1 --v2
+
+	# Disk To Mirror
+	oc-mirror -c ./isc.yaml --from file:///home/<user>/oc-mirror/mirror1 docker://localhost:6000 --v2
+
+	# Mirror To Mirror
+	oc-mirror -c ./isc.yaml --workspace file:///home/<user>/oc-mirror/mirror1 docker://localhost:6000 --v2
+
+	# Delete Phase 1 (--generate)
+	oc-mirror delete -c ./delete-isc.yaml --generate --workspace file:///home/<user>/oc-mirror/delete1 --delete-id delete1-test docker://localhost:6000 --v2
+
+	# Delete Phase 2
+	oc-mirror delete --delete-yaml-file /home/<user>/oc-mirror/delete1/working-dir/delete/delete-images-delete1-test.yaml docker://localhost:6000 --v2
+`
+
 	if len(os.Args) == 1 {
-		fmt.Println("usage: oc-mirror blah blah")
+		fmt.Println(usage)
 		os.Exit(1)
 	}
 
@@ -98,7 +119,7 @@ func Execute() error {
 		log.Info("mirror time     : %v", execTime)
 	case deleteCommand:
 		if len(os.Args) == 2 {
-			fmt.Println("usage: oc-mirror delete blah blah")
+			fmt.Println(usage)
 			os.Exit(1)
 		} else if len(os.Args) > 2 {
 			if os.Args[2] == "--help" {

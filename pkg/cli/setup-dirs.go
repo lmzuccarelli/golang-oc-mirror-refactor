@@ -23,7 +23,7 @@ func (o Setup) CreateDirectories() error {
 	// ensure working dir exists
 	err := os.MkdirAll(o.Options.WorkingDir, 0755)
 	if err != nil {
-		return fmt.Errorf("setup working-dir %v ", err)
+		return fmt.Errorf("setup working-dir (%s) %v ", o.Options.WorkingDir, err)
 	}
 
 	// create signatures directory

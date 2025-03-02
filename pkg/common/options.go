@@ -85,6 +85,12 @@ type MirrorOptions struct {
 	dockerDaemonHost             string // docker-daemon: host to connect to
 	RegistryLogFile              *os.File
 	WithV1Tags                   bool
+	DeleteID                     string
+	ForceCacheDelete             bool
+	DeleteDestination            string
+	DeleteGenerate               bool
+	DeleteYaml                   string
+	DeleteV1                     bool
 }
 
 const defaultUserAgent string = "oc-mirror"

@@ -1,5 +1,7 @@
 package mirror
 
+// TODO:
+// refactor to a global const in one pkg
 const (
 	MirrorToDisk        = "mirrorToDisk"
 	DiskToMirror        = "diskToMirror"

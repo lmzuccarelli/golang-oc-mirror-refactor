@@ -1,5 +1,7 @@
 package common
 
+// TODO:
+// refactor to a global const in one pkg
 const (
 	TestFolder     string = "../../../tests/"
 	mirrorToDisk   string = "mirror-to-disk"

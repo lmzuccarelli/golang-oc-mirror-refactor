@@ -34,9 +34,10 @@ func New(ctx context.Context, log clog.PluggableLoggerInterface, cfg v2alpha1.Im
 	}
 }
 
-func (o CollectAdditional) Collect() ([]v2alpha1.CopyImageSchema, error) {
+func (o CollectAdditional) Collect() (v2alpha1.CollectorSchema, error) {
 
 	var allImages []v2alpha1.CopyImageSchema
+	cs := v2alpha1.CollectorSchema{}
 
 	o.Log.Debug(collectorPrefix+"setting copy option MultiArch=%s when collecting releases image", o.Options.MultiArch)
 	for _, img := range o.Config.ImageSetConfigurationSpec.Mirror.AdditionalImages {
@@ -70,7 +71,7 @@ func (o CollectAdditional) Collect() ([]v2alpha1.CopyImageSchema, error) {
 			imgSpec, err := image.ParseRef(img.Name)
 			if err != nil {
 				o.Log.Error(errMsg, err.Error())
-				return nil, err
+				return cs, err
 			}
 
 			if imgSpec.Transport == dockerProtocol {
@@ -100,20 +101,17 @@ func (o CollectAdditional) Collect() ([]v2alpha1.CopyImageSchema, error) {
 
 		}
 		if tmpSrc == "" || tmpDest == "" {
-			//o.Log.Error(collectorPrefix+"unable to determine src %s or dst %s for %s", tmpSrc, tmpDest, img.Name)
-			return allImages, fmt.Errorf(collectorPrefix+"unable to determine src %s or dst %s for %s", tmpSrc, tmpDest, img.Name)
+			return cs, fmt.Errorf(collectorPrefix+"unable to determine src %s or dst %s for %s", tmpSrc, tmpDest, img.Name)
 		}
 		srcSpec, err := image.ParseRef(tmpSrc) // makes sure this ref is valid, and adds transport if needed
 		if err != nil {
-			//o.Log.Error(errMsg, err.Error())
-			return nil, err
+			return cs, err
 		}
 		src = srcSpec.ReferenceWithTransport
 
 		destSpec, err := image.ParseRef(tmpDest) // makes sure this ref is valid, and adds transport if needed
 		if err != nil {
-			//o.Log.Error(errMsg, err.Error())
-			return nil, err
+			return cs, err
 		}
 		dest = destSpec.ReferenceWithTransport
 
@@ -122,5 +120,6 @@ func (o CollectAdditional) Collect() ([]v2alpha1.CopyImageSchema, error) {
 
 		allImages = append(allImages, v2alpha1.CopyImageSchema{Source: src, Destination: dest, Origin: origin, Type: v2alpha1.TypeGeneric})
 	}
-	return allImages, nil
+	cs.AllImages = allImages
+	return cs, nil
 }

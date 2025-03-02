@@ -9,7 +9,7 @@ import (
 )
 
 type CollectorManagerInterface interface {
-	CollectAllImages() ([]v2alpha1.CopyImageSchema, error)
+	CollectAllImages() ([]v2alpha1.CollectorSchema, error)
 	AddCollector(collector common.ImageCollectorInteface)
 }
 
@@ -27,16 +27,16 @@ func New(ctx context.Context, log clog.PluggableLoggerInterface, cfg v2alpha1.Im
 	return collect
 }
 
-func (o CollectorManager) CollectAllImages() ([]v2alpha1.CopyImageSchema, error) {
-	allImages := []v2alpha1.CopyImageSchema{}
+func (o CollectorManager) CollectAllImages() ([]v2alpha1.CollectorSchema, error) {
+	cs := []v2alpha1.CollectorSchema{}
 	for _, col := range collectors {
 		imgs, err := col.Collect()
 		if err != nil {
-			return nil, err
+			return cs, err
 		}
-		allImages = append(allImages, imgs...)
+		cs = append(cs, imgs)
 	}
-	return allImages, nil
+	return cs, nil
 }
 
 func (o CollectorManager) AddCollector(collector common.ImageCollectorInteface) {

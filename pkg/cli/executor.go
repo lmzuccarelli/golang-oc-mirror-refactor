@@ -46,7 +46,7 @@ func Execute() error {
 	mainCmd.BoolVar(&options.Quiet, "quiet", false, "Enable detailed logging when copying images")
 	mainCmd.BoolVar(&options.Force, "force", false, "Force the copy and mirror functionality")
 	mainCmd.StringVar(&options.SinceString, "since", "", "Include all new content since specified date (format yyyy-MM-dd). When not provided, new content since previous mirroring is mirrored")
-	mainCmd.DurationVar(&options.CommandTimeout, "image-timeout", 4*time.Minute, "Timeout for mirroring an image")
+	mainCmd.DurationVar(&options.CommandTimeout, "image-timeout", 10*time.Minute, "Timeout for mirroring an image")
 	mainCmd.BoolVar(&options.SecurePolicy, "secure-policy", false, "If set, will enable signature verification (secure policy for signature verification)")
 	mainCmd.IntVar(&options.MaxNestedPaths, "max-nested-paths", 0, "Number of nested paths, for destination registries that limit nested paths")
 	mainCmd.BoolVar(&options.StrictArchiving, "strict-archive", false, "If set, generates archives that are strictly less than archiveSize (set in the imageSetConfig). Mirroring will exit in error if a file being archived exceed archiveSize(GB)")
@@ -55,20 +55,38 @@ func Execute() error {
 	mainCmd.BoolVar(&options.SourceTlsVerify, "src-tls-verify", false, "Use http (default) set to true to enable source tls-verify")
 	mainCmd.StringVar(&options.MultiArch, "multi-arch", "system", "Override by setting the value to 'all' (default is 'system')")
 
-	subCommand := mirrorCmd
-	if os.Args[1] == deleteCmd {
-		subCommand = deleteCmd
+	deleteCmd := flag.NewFlagSet("delete", flag.ExitOnError)
+
+	deleteCmd.StringVar(&options.ConfigPath, "config", "", "Path to delete imageset configuration file")
+	deleteCmd.StringVar(&options.DeleteID, "delete-id", "", "Used to differentiate between versions for files created by the delete functionality")
+	deleteCmd.StringVar(&options.DeleteYaml, "delete-yaml-file", "", "If set will use the generated or updated yaml file to delete contents")
+	deleteCmd.StringVar(&options.Workspace, "workspace", "", "oc-mirror workspace where resources and internal artifacts are generated")
+	deleteCmd.BoolVar(&options.ForceCacheDelete, "force-cache-delete", false, "Used to force delete  the local cache manifests and blobs")
+	deleteCmd.BoolVar(&options.DeleteGenerate, "generate", false, "Used to generate the delete yaml for the list of manifests and blobs , used in the step to actually delete from local cahce and remote registry")
+	deleteCmd.BoolVar(&options.DeleteV1, "delete-v1-images", false, "Used during the migration, along with --generate, in order to target images previously mirrored with oc-mirror v1")
+
+	if len(os.Args) == 1 {
+		fmt.Println("usage: oc-mirror blah blah")
+		os.Exit(1)
+	}
+
+	subCommand := mirrorCommand
+	if os.Args[1] == deleteCommand {
+		subCommand = deleteCommand
 	}
 
 	switch subCommand {
 
-	case mirrorCmd:
-		// parse command line args
+	case mirrorCommand:
+		if os.Args[1] == "--help" {
+			mainCmd.PrintDefaults()
+			os.Exit(0)
+		}
 		mainCmd.Parse(os.Args[1:])
 		log := clog.New(options.LogLevel)
+		log.Info("flags %t %s", options.DryRun, options.LogLevel)
 		ctx := context.Background()
 		startTime := time.Now()
-		// mirror flow - uses the NewMirrorFlowController
 		controller := NewMirrorFlowController(ctx, log, &options)
 		err := controller.Process(mainCmd.Args())
 		if err != nil {
@@ -78,8 +96,29 @@ func Execute() error {
 		endTime := time.Now()
 		execTime := endTime.Sub(startTime)
 		log.Info("mirror time     : %v", execTime)
-	case deleteCmd:
-		fmt.Println("subcommand 'delete'")
+	case deleteCommand:
+		if len(os.Args) == 2 {
+			fmt.Println("usage: oc-mirror delete blah blah")
+			os.Exit(1)
+		} else if len(os.Args) > 2 {
+			if os.Args[2] == "--help" {
+				deleteCmd.PrintDefaults()
+				os.Exit(0)
+			}
+		}
+		deleteCmd.Parse(os.Args[2:])
+		log := clog.New(options.LogLevel)
+		ctx := context.Background()
+		startTime := time.Now()
+		controller := NewDeleteFlowController(ctx, log, &options)
+		err := controller.Process(deleteCmd.Args())
+		if err != nil {
+			log.Error("%v", err)
+			return err
+		}
+		endTime := time.Now()
+		execTime := endTime.Sub(startTime)
+		log.Info("mirror time     : %v", execTime)
 	default:
 		return fmt.Errorf("it seems you stuffed up the command line args")
 	}

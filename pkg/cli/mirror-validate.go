@@ -10,16 +10,16 @@ import (
 	clog "github.com/lmzuccarelli/golang-oc-mirror-refactor/pkg/log"
 )
 
-type ValidateInterface interface {
+type MirrorValidateInterface interface {
 	CheckArgs(args []string) error
 }
 
-type Validate struct {
+type MirrorValidate struct {
 	Log     clog.PluggableLoggerInterface
 	Options *common.MirrorOptions
 }
 
-func (o Validate) CheckArgs(args []string) error {
+func (o MirrorValidate) CheckArgs(args []string) error {
 
 	keyWords := []string{
 		"cluster-resources",
@@ -43,19 +43,6 @@ func (o Validate) CheckArgs(args []string) error {
 	if err != nil {
 		return err
 	}
-
-	/*
-		if strings.Contains(o.Options.OriginalDestination, dockerProtocol) && o.Options.WorkingDir != "" && o.Options.From != "" {
-			return fmt.Errorf("when destination is docker://, --from (assumes disk to mirror workflow) and --workspace (assumes mirror to mirror workflow) cannot be used together")
-		}
-		if strings.Contains(o.Options.OriginalDestination, dockerProtocol) && o.Options.WorkingDir == "" && o.Options.From == "" {
-			return fmt.Errorf("when destination is docker://, either --from (assumes disk to mirror workflow) or --workspace (assumes mirror to mirror workflow) need to be provided")
-		}
-		if strings.Contains(o.Options.OriginalDestination, fileProtocol) || strings.Contains(o.Options.OriginalDestination, dockerProtocol) {
-		} else {
-			return fmt.Errorf("destination must have either file:// (mirror to disk) or docker:// (diskToMirror) protocol prefixes")
-		}
-	*/
 
 	// OCPBUGS-42862
 	if strings.Contains(o.Options.OriginalDestination, fileProtocol) && o.Options.From == "" {
@@ -134,6 +121,9 @@ func setModeAndDestination(args []string, opts *common.MirrorOptions) error {
 		} else {
 			return fmt.Errorf("when using the --workspace flag ensure it has a file:// prefix (mirror-to-mirror)")
 		}
+	}
+	if opts.DryRun {
+		opts.Mode = dryrun
 	}
 	return nil
 }

@@ -15,7 +15,7 @@ import (
 	"github.com/containers/image/v5/transports/alltransports"
 	"github.com/containers/image/v5/types"
 	"github.com/distribution/reference"
-	"github.com/lmzuccarelli/golang-oc-mirror-refactor/pkg/api/v2alpha1"
+	//"github.com/lmzuccarelli/golang-oc-mirror-refactor/pkg/api/v2alpha1"
 	"github.com/lmzuccarelli/golang-oc-mirror-refactor/pkg/common"
 	clog "github.com/lmzuccarelli/golang-oc-mirror-refactor/pkg/log"
 	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
@@ -30,12 +30,11 @@ type MirrorInterface interface {
 type MirrorController struct {
 	Log     clog.PluggableLoggerInterface
 	Options *common.MirrorOptions
-	Config  v2alpha1.ImageSetConfiguration
 	Context context.Context
 }
 
-func New(ctx context.Context, log clog.PluggableLoggerInterface, cfg v2alpha1.ImageSetConfiguration, opts *common.MirrorOptions) MirrorInterface {
-	mirror := MirrorController{Context: ctx, Log: log, Config: cfg, Options: opts}
+func New(ctx context.Context, log clog.PluggableLoggerInterface, opts *common.MirrorOptions) MirrorInterface {
+	mirror := MirrorController{Context: ctx, Log: log, Options: opts}
 	return mirror
 }
 

@@ -5,5 +5,5 @@ import (
 )
 
 type ImageCollectorInteface interface {
-	Collect() ([]v2alpha1.CopyImageSchema, error)
+	Collect() (v2alpha1.CollectorSchema, error)
 }

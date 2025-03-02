@@ -212,7 +212,6 @@ func ConvertIndexToSingleManifest(dir string, oci *v2alpha1.OCISchema) error {
 }
 
 func GetDigest(ctx context.Context, sourceCtx *types.SystemContext, imgRef string) (string, error) {
-	//setInternalLog(o.Log)
 
 	if err := mirror.ReexecIfNecessaryForImages([]string{imgRef}...); err != nil {
 		return "", err

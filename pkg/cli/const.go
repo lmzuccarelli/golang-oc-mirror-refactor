@@ -1,5 +1,7 @@
 package cli
 
+// TODO:
+// refactor to a global const in one pkg
 const (
 	collecAllPrefix               string = "[CollectAll] "
 	dockerProtocol                string = "docker://"
@@ -30,9 +32,12 @@ const (
 	maxParallelLayerDownloads     uint   = 10
 	maxParallelImageDownloads     uint   = 8
 	limitOverallParallelDownloads uint   = 200
-	mirrorCmd                     string = "mirror"
-	deleteCmd                     string = "delete"
+	mirrorCommand                 string = "mirror"
+	deleteCommand                 string = "delete"
 	mirrorToDisk                  string = "mirror-to-disk"
 	diskToMirror                  string = "disk-to-mirror"
 	mirrorToMirror                string = "mirror-to-mirror"
+	dryrun                        string = "mirror-to-disk"
+	graphURL                      string = "https://api.openshift.com/api/upgrades_info/graph-data"
+	deleteDir                     string = "/delete/"
 )

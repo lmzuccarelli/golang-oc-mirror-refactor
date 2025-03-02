@@ -54,12 +54,14 @@ func New(ctx context.Context, log clog.PluggableLoggerInterface, cfg v2alpha1.Im
 	}
 }
 
-func (o CollectHelm) Collect() ([]v2alpha1.CopyImageSchema, error) {
+func (o CollectHelm) Collect() (v2alpha1.CollectorSchema, error) {
 	var (
 		allImages     []v2alpha1.CopyImageSchema
 		allHelmImages []v2alpha1.RelatedImage
 		errs          []error
 	)
+
+	cs := v2alpha1.CollectorSchema{}
 
 	switch {
 	case o.Options.IsMirrorToDisk() || o.Options.IsMirrorToMirror():
@@ -176,7 +178,8 @@ func (o CollectHelm) Collect() ([]v2alpha1.CopyImageSchema, error) {
 			errs = append(errs, err)
 		}
 	}
-	return allImages, errors.Join(errs...)
+	cs.AllImages = allImages
+	return cs, errors.Join(errs...)
 }
 
 func createTempFile(log clog.PluggableLoggerInterface, dir string) (func(), string, error) {

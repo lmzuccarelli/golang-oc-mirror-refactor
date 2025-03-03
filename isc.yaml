@@ -1,0 +1,18 @@
+kind: ImageSetConfiguration
+apiVersion: mirror.openshift.io/v2alpha1
+mirror:
+  platform:
+    graph: true
+    releases: 
+    - name: quay.io/openshift-release-dev/ocp-release@sha256:e0907823bc8989b02bb1bd55d5f08262dd0e4846173e792c14e7684fbd476c0d
+  operators:
+  - catalog: registry.redhat.io/redhat/redhat-operator-index:v4.18 
+    packages:
+    - name: devworkspace-operator
+  additionalImages:
+  - name: registry.redhat.io/ubi9/ubi-init:latest
+  helm:
+    repositories:
+    - name: sbo
+      url: https://redhat-developer.github.io/service-binding-operator-helm-chart/
+

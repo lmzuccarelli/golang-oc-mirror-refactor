@@ -1,5 +1,4 @@
 build/
 refactor/
 *.log
-*.yaml
 *.json

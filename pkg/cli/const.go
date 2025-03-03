@@ -40,4 +40,6 @@ const (
 	dryrun                        string = "mirror-to-disk"
 	graphURL                      string = "https://api.openshift.com/api/upgrades_info/graph-data"
 	deleteDir                     string = "/delete/"
+	deleteFunction                string = "delete"
+	mirrorFunction                string = "copy"
 )

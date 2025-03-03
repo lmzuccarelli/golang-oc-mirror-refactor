@@ -153,9 +153,13 @@ func (o *ChannelConcurrentBatch) Worker(ctx context.Context, collectorSchema v2a
 					default:
 						if !triggered {
 							triggered = true
-							timeoutCtx, _ := opts.CommandTimeoutContext()
 
-							err = o.Mirror.Copy(timeoutCtx, img.Source, img.Destination, opts)
+							timeoutCtx, _ := opts.CommandTimeoutContext()
+							if opts.IsCopy() {
+								err = o.Mirror.Copy(timeoutCtx, img.Source, img.Destination, opts)
+							} else {
+								err = o.Mirror.Delete(timeoutCtx, img.Destination, opts)
+							}
 
 							switch {
 							case err == nil:

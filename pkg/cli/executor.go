@@ -105,7 +105,6 @@ func Execute() error {
 		}
 		mainCmd.Parse(os.Args[1:])
 		log := clog.New(options.LogLevel)
-		log.Info("flags %t %s", options.DryRun, options.LogLevel)
 		ctx := context.Background()
 		startTime := time.Now()
 		controller := NewMirrorFlowController(ctx, log, &options)

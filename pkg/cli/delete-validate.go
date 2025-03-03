@@ -77,7 +77,7 @@ func (o DeleteValidate) CheckArgs(args []string) error {
 		return fmt.Errorf("file not found %s", deleteFile)
 	}
 	o.Options.Mode = diskToMirror
-	o.Options.Function = deleteCommand
+	o.Options.Function = deleteFunction
 	o.Options.LocalStorageFQDN = "localhost:" + strconv.Itoa(int(o.Options.Port))
 	o.Options.RemoveSignatures = true
 	o.Options.SourceTlsVerify = false

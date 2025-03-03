@@ -222,7 +222,7 @@ func (o DeleteImages) DeleteRegistryImages(deleteImageList v2alpha1.DeleteImageL
 
 	o.Options.Stdout = io.Discard
 	if !o.Options.DeleteGenerate && len(o.Options.DeleteDestination) > 0 {
-		if _, err := o.Batch.Worker(context.Background(), collectorSchema, o.Options); err != nil {
+		if _, err := o.Batch.Worker(o.Context, collectorSchema, o.Options); err != nil {
 			return err
 		}
 	}

@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -62,8 +63,6 @@ func (o MirrorFlowController) Process(args []string) error {
 			return fmt.Errorf("unable to parse since flag: %v. Expected format is yyyy-MM.dd", err)
 		}
 	}
-	o.Options.Function = "mirror"
-
 	config := config.Config{}
 	cfg, err := config.Read(o.Options.ConfigPath, v2alpha1.ImageSetConfigurationKind)
 	if err != nil {
@@ -128,6 +127,14 @@ func (o MirrorFlowController) Process(args []string) error {
 			return nil
 		}
 	} else {
+		if o.Options.MaxNestedPaths > 0 {
+			copiedImages.AllImages, err = withMaxNestedPaths(copiedImages.AllImages, o.Options.MaxNestedPaths)
+			if err != nil {
+				return err
+			}
+		}
+
+		copiedImages.AllImages = excludeImages(copiedImages.AllImages, cfg.(v2alpha1.ImageSetConfiguration).Mirror.BlockedImages)
 
 		err = catalog.Rebuild(copiedImages)
 		if err != nil {
@@ -265,4 +272,40 @@ func findFirstRelease(cs []v2alpha1.CollectorSchema) (v2alpha1.CopyImageSchema, 
 		}
 	}
 	return v2alpha1.CopyImageSchema{}, fmt.Errorf("no release image found")
+}
+
+// withMaxNestedPaths()
+func withMaxNestedPaths(in []v2alpha1.CopyImageSchema, maxNestedPaths int) ([]v2alpha1.CopyImageSchema, error) {
+	out := []v2alpha1.CopyImageSchema{}
+	for _, img := range in {
+		dst, err := image.WithMaxNestedPaths(img.Destination, maxNestedPaths)
+		if err != nil {
+			return nil, err
+		}
+		img.Destination = dst
+		out = append(out, img)
+	}
+	return out, nil
+}
+
+// excludeImages
+func excludeImages(images []v2alpha1.CopyImageSchema, excluded []v2alpha1.Image) []v2alpha1.CopyImageSchema {
+	if excluded == nil {
+		return images
+	}
+	images = slices.DeleteFunc(images, func(image v2alpha1.CopyImageSchema) bool {
+		if image.Origin == "" {
+			return false
+		}
+		isInSlice := slices.ContainsFunc(excluded, func(excludedImage v2alpha1.Image) bool {
+			imgOrigin := image.Origin
+			if strings.Contains(imgOrigin, "://") {
+				splittedImageOrigin := strings.Split(imgOrigin, "://")
+				imgOrigin = splittedImageOrigin[1]
+			}
+			return excludedImage.Name == imgOrigin
+		})
+		return isInSlice
+	})
+	return images
 }

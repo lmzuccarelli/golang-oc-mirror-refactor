@@ -67,6 +67,7 @@ func (o MirrorValidate) CheckArgs(args []string) error {
 	}
 	o.Options.MultiArch = "system"
 	o.Options.RemoveSignatures = true
+	o.Options.Function = mirrorFunction
 	return nil
 }
 

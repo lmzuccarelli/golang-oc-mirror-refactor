@@ -25,6 +25,7 @@ type Mode string
 
 type MirrorInterface interface {
 	Copy(ctx context.Context, src, dest string, opts *common.MirrorOptions) (retErr error)
+	Delete(ctx context.Context, dest string, opts *common.MirrorOptions) (retErr error)
 }
 
 type MirrorController struct {
@@ -213,7 +214,7 @@ func Check(ctx context.Context, image string, opts *common.MirrorOptions, asCopy
 }
 
 // delete - delete images
-func Delete(ctx context.Context, image string, opts *common.MirrorOptions) error {
+func (o MirrorController) Delete(ctx context.Context, image string, opts *common.MirrorOptions) error {
 
 	if err := ReexecIfNecessaryForImages([]string{image}...); err != nil {
 		return err
@@ -225,15 +226,13 @@ func Delete(ctx context.Context, image string, opts *common.MirrorOptions) error
 	}
 
 	sysCtx := opts.NewSystemContext()
-	//if err != nil {
-	//	return err
-	//}
 
 	if strings.Contains(image, opts.LocalStorageFQDN) { // when copying to cache, use HTTP
 		sysCtx.DockerInsecureSkipTLSVerify = types.OptionalBoolTrue
 	}
 
 	return retry.IfNecessary(ctx, func() error {
+
 		err := imageRef.DeleteImage(ctx, sysCtx)
 		if err != nil {
 			return err

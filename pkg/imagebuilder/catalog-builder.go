@@ -45,7 +45,7 @@ type GCRCatalogBuilder struct {
 	CopyOpts   common.MirrorOptions
 }
 
-func NewGCRCatalogBuilder(logger log.PluggableLoggerInterface, opts common.MirrorOptions) CatalogBuilderInterface {
+func NewGCRCatalogBuilder(logger log.PluggableLoggerInterface, opts common.MirrorOptions) *GCRCatalogBuilder {
 	builder := NewBuilder(logger, opts)
 	return &GCRCatalogBuilder{
 		Logger:     logger,
@@ -60,17 +60,17 @@ func (c GCRCatalogBuilder) RebuildCatalog(ctx context.Context, catalogCopyRef v2
 
 	_, err := os.Stat(configPath)
 	if err != nil {
-		return fmt.Errorf("error reading filtered config for catalog %s from %s: %v", catalogCopyRef.Origin, configPath, err)
+		return fmt.Errorf("error reading filtered config for catalog %s from %s: %w", catalogCopyRef.Origin, configPath, err)
 	}
 
 	originCatalogLayoutDir, err := catalogImageOnDisk(configPath)
 	if err != nil {
-		return fmt.Errorf("error initializing a container image for catalog %s from %s: %v", catalogCopyRef.Origin, originCatalogLayoutDir, err)
+		return fmt.Errorf("error initializing a container image for catalog %s from %s: %w", catalogCopyRef.Origin, originCatalogLayoutDir, err)
 	}
 
 	configLayerToAdd, err := LayerFromPathWithUidGid("/configs", configPath, 0, 0)
 	if err != nil {
-		return fmt.Errorf("error creating add layer: %v", err)
+		return fmt.Errorf("error creating add layer: %w", err)
 	}
 	layersToAdd = append(layersToAdd, configLayerToAdd)
 
@@ -78,7 +78,7 @@ func (c GCRCatalogBuilder) RebuildCatalog(ctx context.Context, catalogCopyRef v2
 	// remove anything that may currently exist
 	deletedConfigLayer, err := deleteLayer("/.wh.configs")
 	if err != nil {
-		return fmt.Errorf("error preparing to delete old /configs from catalog %s : %v", catalogCopyRef.Origin, err)
+		return fmt.Errorf("error preparing to delete old /configs from catalog %s : %w", catalogCopyRef.Origin, err)
 	}
 	layersToDelete = append(layersToDelete, deletedConfigLayer)
 
@@ -89,15 +89,15 @@ func (c GCRCatalogBuilder) RebuildCatalog(ctx context.Context, catalogCopyRef v2
 	layers = append(layers, layersToDelete...)
 	layers = append(layers, layersToAdd...)
 
-	layoutDir := strings.Replace(configPath, operatorCatalogConfigDir, operatorCatalogFilteredImageDir, -1)
+	layoutDir := strings.ReplaceAll(configPath, operatorCatalogConfigDir, operatorCatalogFilteredImageDir)
 
 	err = copy.Copy(originCatalogLayoutDir, layoutDir)
 	if err != nil {
-		return fmt.Errorf("error creating OCI layout: %v", err)
+		return fmt.Errorf("error creating OCI layout: %w", err)
 	}
 	layoutPath, err := layout.FromPath(layoutDir)
 	if err != nil {
-		return fmt.Errorf("error creating OCI layout: %v", err)
+		return fmt.Errorf("error creating OCI layout: %w", err)
 	}
 
 	configCMD := []string{"serve", "/configs"}
@@ -106,7 +106,7 @@ func (c GCRCatalogBuilder) RebuildCatalog(ctx context.Context, catalogCopyRef v2
 	filteredDir := filepath.Dir(configPath)
 	destRef, err := image.ParseRef(catalogCopyRef.Destination)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w", err)
 	}
 
 	switch c.CopyOpts.Mode {
@@ -116,7 +116,7 @@ func (c GCRCatalogBuilder) RebuildCatalog(ctx context.Context, catalogCopyRef v2
 		srcCache = strings.Replace(catalogCopyRef.Destination, c.CopyOpts.Destination, dockerProtocol+c.CopyOpts.LocalStorageFQDN, 1)
 		destRef, err := image.ParseRef(srcCache)
 		if err != nil {
-			return err
+			return fmt.Errorf("%w", err)
 		}
 		srcCache = destRef.SetTag(filepath.Base(filteredDir)).Reference
 		c.CopyOpts.SourceTlsVerify = false
@@ -126,11 +126,12 @@ func (c GCRCatalogBuilder) RebuildCatalog(ctx context.Context, catalogCopyRef v2
 	}
 	digest, err := c.imgBuilder.BuildAndPush(ctx, srcCache, layoutPath, configCMD, layers...)
 	if err != nil {
-		return fmt.Errorf("error building catalog %s : %v", catalogCopyRef.Origin, err)
+		return fmt.Errorf("error building catalog %s : %w", catalogCopyRef.Origin, err)
 	}
+	// #nosec G306
 	err = os.WriteFile(filepath.Join(filteredDir, "digest"), []byte(digest), 0755)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w", err)
 	}
 	return nil
 }
@@ -138,13 +139,14 @@ func (c GCRCatalogBuilder) RebuildCatalog(ctx context.Context, catalogCopyRef v2
 // LayerFromPath will write the contents of the path(s) the target
 // directory specifying the target UID/GID and build a v1.Layer.
 // Use gid = -1 , uid = -1 if you don't want to override.
+// nolint: ireturn
 func LayerFromPathWithUidGid(targetPath, path string, uid int, gid int) (v1.Layer, error) {
 	var b bytes.Buffer
 	tw := tar.NewWriter(&b)
 
 	pathInfo, err := os.Stat(path)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w", err)
 	}
 
 	processPaths := func(hdr *tar.Header, info os.FileInfo, fp string) error {
@@ -152,6 +154,7 @@ func LayerFromPathWithUidGid(targetPath, path string, uid int, gid int) (v1.Laye
 			hdr.Size = info.Size()
 		}
 		hdr.ChangeTime = time.Now()
+		// nolint: gocritic
 		if info.Mode().IsDir() {
 			hdr.Typeflag = tar.TypeDir
 		} else if info.Mode().IsRegular() {
@@ -166,14 +169,14 @@ func LayerFromPathWithUidGid(targetPath, path string, uid int, gid int) (v1.Laye
 		if !info.IsDir() {
 			f, err := os.Open(filepath.Clean(fp))
 			if err != nil {
-				return err
+				return fmt.Errorf("%w", err)
 			}
 			if _, err := io.Copy(tw, f); err != nil {
 				return fmt.Errorf("failed to read file into the tar: %w", err)
 			}
 			err = f.Close()
 			if err != nil {
-				return err
+				return fmt.Errorf("%w", err)
 			}
 		}
 		return nil
@@ -182,7 +185,7 @@ func LayerFromPathWithUidGid(targetPath, path string, uid int, gid int) (v1.Laye
 	if pathInfo.IsDir() {
 		err := filepath.Walk(path, func(fp string, info os.FileInfo, err error) error {
 			if err != nil {
-				return err
+				return fmt.Errorf("%w", err)
 			}
 			rel, err := filepath.Rel(path, fp)
 			if err != nil {
@@ -246,7 +249,7 @@ func LayerFromPathWithUidGid(targetPath, path string, uid int, gid int) (v1.Laye
 		}
 
 		if err := processPaths(hdr, pathInfo, path); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w", err)
 		}
 	}
 
@@ -257,12 +260,15 @@ func LayerFromPathWithUidGid(targetPath, path string, uid int, gid int) (v1.Laye
 	opener := func() (io.ReadCloser, error) {
 		return io.NopCloser(bytes.NewReader(b.Bytes())), nil
 	}
+	// nolint: wrapcheck
 	return tarball.LayerFromOpener(opener)
 }
 
+// nolint: ireturn
 func deleteLayer(old string) (v1.Layer, error) {
 	deleteMap := map[string][]byte{}
 	deleteMap[old] = []byte{}
+	// nolint: wrapcheck
 	return crane.Layer(deleteMap)
 }
 
@@ -271,6 +277,6 @@ func catalogImageOnDisk(configPath string) (string, error) {
 	originCatalogDir := filepath.Dir(filepath.Dir(filepath.Dir(configPath)))
 	originCatalogLayoutDir := filepath.Join(originCatalogDir, operatorCatalogImageDir)
 	_, err := os.Stat(originCatalogLayoutDir)
-	return originCatalogLayoutDir, err
+	return originCatalogLayoutDir, fmt.Errorf("%w", err)
 
 }

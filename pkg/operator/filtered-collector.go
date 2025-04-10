@@ -2,6 +2,7 @@ package operator
 
 import (
 	"context"
+	// #nosec G501
 	"crypto/md5"
 	"encoding/json"
 	"errors"
@@ -30,11 +31,11 @@ import (
 )
 
 const (
-	operatorImageExtractDir           = "hold-operator" //TODO ALEX REMOVE ME when filtered_collector.go is the default
+	operatorImageExtractDir           = "hold-operator" // TODO ALEX REMOVE ME when filtered_collector.go is the default
 	dockerProtocol                    = "docker://"
 	ociProtocol                       = "oci://"
 	ociProtocolTrimmed                = "oci:"
-	operatorImageDir                  = "operator-images" //TODO ALEX REMOVE ME when filtered_collector.go is the default
+	operatorImageDir                  = "operator-images" // TODO ALEX REMOVE ME when filtered_collector.go is the default
 	operatorCatalogsDir        string = "operator-catalogs"
 	operatorCatalogConfigDir   string = "catalog-config"
 	operatorCatalogImageDir    string = "catalog-image"
@@ -52,13 +53,11 @@ type CollectOperator struct {
 	Log     clog.PluggableLoggerInterface
 	Options *common.MirrorOptions
 	Config  v2alpha1.ImageSetConfiguration
-	Context context.Context
 	Mirror  mirror.MirrorInterface
 }
 
-func New(ctx context.Context, log clog.PluggableLoggerInterface, mi mirror.MirrorInterface, cfg v2alpha1.ImageSetConfiguration, opts *common.MirrorOptions) common.ImageCollectorInteface {
+func New(log clog.PluggableLoggerInterface, mi mirror.MirrorInterface, cfg v2alpha1.ImageSetConfiguration, opts *common.MirrorOptions) CollectOperator {
 	return CollectOperator{
-		Context: ctx,
 		Log:     log,
 		Options: opts,
 		Config:  cfg,
@@ -89,6 +88,8 @@ func (o CollectOperator) Collect() (v2alpha1.CollectorSchema, error) {
 		ctlgHandler: hndl,
 		Config:      o.Config,
 	}
+
+	ctx := context.Background()
 
 	relatedImages := make(map[string][]v2alpha1.RelatedImage)
 	collectorSchema := v2alpha1.CollectorSchema{}
@@ -138,7 +139,7 @@ func (o CollectOperator) Collect() (v2alpha1.CollectorSchema, error) {
 		//OCPBUGS-36214: For diskToMirror (and delete), access to the source registry is not guaranteed
 		catalogDigest := ""
 		if o.Options.IsDiskToMirror() || o.Options.IsDelete() {
-			d, err := oi.catalogDigest(o.Context, op)
+			d, err := oi.catalogDigest(ctx, op)
 			if err != nil {
 				o.Log.Error(errMsg, err.Error())
 				spinner.Abort(true)
@@ -148,7 +149,7 @@ func (o CollectOperator) Collect() (v2alpha1.CollectorSchema, error) {
 			catalogDigest = d
 		} else {
 			sourceCtx := o.Options.NewSystemContext()
-			d, err := manifest.GetDigest(o.Context, sourceCtx, imgSpec.ReferenceWithTransport)
+			d, err := manifest.GetDigest(ctx, sourceCtx, imgSpec.ReferenceWithTransport)
 			// OCPBUGS-36548 (manifest unknown)
 			if err != nil {
 				spinner.Abort(true)
@@ -194,7 +195,7 @@ func (o CollectOperator) Collect() (v2alpha1.CollectorSchema, error) {
 				spinner.Wait()
 				return cs, err
 			}
-			isAlreadyFiltered = oi.isAlreadyFiltered(o.Context, srcFilteredCatalog, string(filteredImageDigest))
+			isAlreadyFiltered = oi.isAlreadyFiltered(ctx, srcFilteredCatalog, string(filteredImageDigest))
 		}
 
 		if isAlreadyFiltered {
@@ -216,7 +217,7 @@ func (o CollectOperator) Collect() (v2alpha1.CollectorSchema, error) {
 				sourceOCIDir, err := filepath.Abs(imgSpec.Reference)
 				if err != nil {
 					o.Log.Error(errMsg, err.Error())
-					return cs, err
+					return cs, fmt.Errorf("%w", err)
 				}
 				catalogImage = ociProtocol + sourceOCIDir
 			} else {
@@ -246,7 +247,7 @@ func (o CollectOperator) Collect() (v2alpha1.CollectorSchema, error) {
 						o.Log.Error(errMsg, err.Error())
 						spinner.Abort(true)
 						spinner.Wait()
-						return cs, err
+						return cs, fmt.Errorf("%w", err)
 					}
 				}
 
@@ -262,7 +263,7 @@ func (o CollectOperator) Collect() (v2alpha1.CollectorSchema, error) {
 				optsCopy := o.Options
 				optsCopy.Stdout = io.Discard
 
-				err = o.Mirror.Copy(o.Context, src, dest, o.Options)
+				err = o.Mirror.Copy(ctx, src, dest, o.Options)
 
 				if err != nil {
 					o.Log.Error(errMsg, err.Error())
@@ -284,7 +285,7 @@ func (o CollectOperator) Collect() (v2alpha1.CollectorSchema, error) {
 					o.Log.Error(errMsg, err.Error())
 					spinner.Abort(true)
 					spinner.Wait()
-					return cs, err
+					return cs, fmt.Errorf("%w", err)
 				}
 
 				oci, err = manifest.GetImageIndex(catalogImageDir)
@@ -292,13 +293,13 @@ func (o CollectOperator) Collect() (v2alpha1.CollectorSchema, error) {
 					o.Log.Error(errMsg, err.Error())
 					spinner.Abort(true)
 					spinner.Wait()
-					return cs, err
+					return cs, fmt.Errorf("%w", err)
 				}
 
 				sourceOCIDir, err := filepath.Abs(imgSpec.Reference)
 				if err != nil {
 					o.Log.Error(errMsg, err.Error())
-					return cs, err
+					return cs, fmt.Errorf("%w", err)
 				}
 				catalogImage = ociProtocol + sourceOCIDir
 			} else {
@@ -329,7 +330,7 @@ func (o CollectOperator) Collect() (v2alpha1.CollectorSchema, error) {
 				o.Log.Error(errMsg, err.Error())
 				spinner.Abort(true)
 				spinner.Wait()
-				return cs, err
+				return cs, fmt.Errorf("%w", err)
 			}
 
 			// we need to check if oci returns multi manifests
@@ -369,7 +370,7 @@ func (o CollectOperator) Collect() (v2alpha1.CollectorSchema, error) {
 				o.Log.Error(errMsg, err.Error())
 				spinner.Abort(true)
 				spinner.Wait()
-				return cs, err
+				return cs, fmt.Errorf("%w", err)
 			}
 
 			label = ocs.Config.Labels.OperatorsOperatorframeworkIoIndexConfigsV1
@@ -382,14 +383,14 @@ func (o CollectOperator) Collect() (v2alpha1.CollectorSchema, error) {
 			if err != nil {
 				spinner.Abort(true)
 				spinner.Wait()
-				return cs, err
+				return cs, fmt.Errorf("%w", err)
 			}
 
 			originalDC, err := oi.ctlgHandler.getDeclarativeConfig(filepath.Join(configsDir, label))
 			if err != nil {
 				spinner.Abort(true)
 				spinner.Wait()
-				return cs, err
+				return cs, fmt.Errorf("%w", err)
 			}
 
 			if !isFullCatalog(op) {
@@ -397,11 +398,11 @@ func (o CollectOperator) Collect() (v2alpha1.CollectorSchema, error) {
 				var filteredDigestPath string
 				var filterDigest string
 
-				filteredDC, err = filterCatalog(o.Context, *originalDC, op)
+				filteredDC, err = filterCatalog(ctx, *originalDC, op)
 				if err != nil {
 					spinner.Abort(true)
 					spinner.Wait()
-					return cs, err
+					return cs, fmt.Errorf("%w", err)
 				}
 
 				filterDigest, err = digestOfFilter(op)
@@ -409,7 +410,7 @@ func (o CollectOperator) Collect() (v2alpha1.CollectorSchema, error) {
 					o.Log.Error(errMsg, err.Error())
 					spinner.Abort(true)
 					spinner.Wait()
-					return cs, err
+					return cs, fmt.Errorf("%w", err)
 				}
 
 				if filterDigest != "" {
@@ -420,7 +421,7 @@ func (o CollectOperator) Collect() (v2alpha1.CollectorSchema, error) {
 						o.Log.Error(errMsg, err.Error())
 						spinner.Abort(true)
 						spinner.Wait()
-						return cs, err
+						return cs, fmt.Errorf("%w", err)
 					}
 				}
 
@@ -428,7 +429,7 @@ func (o CollectOperator) Collect() (v2alpha1.CollectorSchema, error) {
 				if err != nil {
 					spinner.Abort(true)
 					spinner.Wait()
-					return cs, err
+					return cs, fmt.Errorf("%w", err)
 				}
 
 				if collectorSchema.CatalogToFBCMap == nil {
@@ -466,8 +467,8 @@ func (o CollectOperator) Collect() (v2alpha1.CollectorSchema, error) {
 			}
 		}
 
-		//OCPBUGS-45059
-		//TODO remove me when the migration from oc-mirror v1 to v2 ends
+		// OCPBUGS-45059
+		// TODO remove me when the migration from oc-mirror v1 to v2 ends
 		if imgSpec.Transport == ociProtocol && oi.isDeleteOfV1CatalogFromDisk() {
 			addOriginFromOperatorCatalogOnDisk(&ri)
 		}
@@ -515,7 +516,7 @@ func (o CollectOperator) Collect() (v2alpha1.CollectorSchema, error) {
 	var count = 0
 	if o.Options.LogLevel == "debug" {
 		for _, v := range relatedImages {
-			count = count + len(v)
+			count += len(v)
 		}
 	}
 	o.Log.Debug(collectorPrefix+"images to copy (before duplicates) %d ", count)
@@ -526,19 +527,19 @@ func (o CollectOperator) Collect() (v2alpha1.CollectorSchema, error) {
 		allImages, err = oi.prepareM2DCopyBatch(relatedImages)
 		if err != nil {
 			o.Log.Error(errMsg, err.Error())
-			return cs, err
+			return cs, fmt.Errorf("%w", err)
 		}
 	case o.Options.IsMirrorToMirror():
 		allImages, err = oi.dispatchImagesForM2M(relatedImages)
 		if err != nil {
 			o.Log.Error(errMsg, err.Error())
-			return cs, err
+			return cs, fmt.Errorf("%w", err)
 		}
 	case o.Options.IsDiskToMirror() || o.Options.IsDelete():
 		allImages, err = oi.prepareD2MCopyBatch(relatedImages)
 		if err != nil {
 			o.Log.Error(errMsg, err.Error())
-			return cs, err
+			return cs, fmt.Errorf("%w", err)
 		}
 
 	}
@@ -573,8 +574,9 @@ func digestOfFilter(catalog v2alpha1.Operator) (string, error) {
 	c.TargetCatalogSourceTemplate = ""
 	pkgs, err := json.Marshal(c)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%w", err)
 	}
+	// #nosec G401
 	return fmt.Sprintf("%x", md5.Sum(pkgs))[0:32], nil
 }
 

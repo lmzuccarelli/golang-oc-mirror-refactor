@@ -25,22 +25,23 @@ import (
 )
 
 type MirrorFlowController struct {
-	Log     clog.PluggableLoggerInterface
-	Options *common.MirrorOptions
-	Context context.Context
+	Log      clog.PluggableLoggerInterface
+	Options  *common.MirrorOptions
+	Validate ValidateInterface
+	Setup    SetupInterface
 }
 
-func NewMirrorFlowController(ctx context.Context, log clog.PluggableLoggerInterface, opts *common.MirrorOptions) FlowControllerInterface {
+func NewMirrorFlowController(log clog.PluggableLoggerInterface, opts *common.MirrorOptions, validate ValidateInterface, setup SetupInterface) MirrorFlowController {
 	return MirrorFlowController{
-		Context: ctx,
-		Log:     log,
-		Options: opts,
+		Log:      log,
+		Options:  opts,
+		Validate: validate,
+		Setup:    setup,
 	}
 }
 
 func (o MirrorFlowController) Process(args []string) error {
-	validate := MirrorValidate{Log: o.Log, Options: o.Options}
-	err := validate.CheckArgs(args)
+	err := o.Validate.CheckArgs(args)
 	if err != nil {
 		return fmt.Errorf("validation failed %s", err.Error())
 	}
@@ -48,8 +49,7 @@ func (o MirrorFlowController) Process(args []string) error {
 	o.Log.Info(emoji.WavingHandSign + " Hello, welcome to oc-mirror (version refactor)")
 	o.Log.Info(emoji.Gear + "  setting up the environment for you...")
 
-	setup := Setup{Log: o.Log, Options: o.Options}
-	err = setup.CreateDirectories()
+	err = o.Setup.CreateDirectories()
 	if err != nil {
 		return fmt.Errorf("setting up directories %s", err.Error())
 	}
@@ -60,7 +60,7 @@ func (o MirrorFlowController) Process(args []string) error {
 		o.Options.Since, err = time.Parse(time.DateOnly, o.Options.SinceString)
 		if err != nil {
 			// this should not happen, as should be caught by Validate
-			return fmt.Errorf("unable to parse since flag: %v. Expected format is yyyy-MM.dd", err)
+			return fmt.Errorf("unable to parse since flag: %w. Expected format is yyyy-MM.dd", err)
 		}
 	}
 	config := config.Config{}
@@ -77,12 +77,12 @@ func (o MirrorFlowController) Process(args []string) error {
 		// extract the archive
 		extractor, err := archive.NewArchiveExtractor(archiveBaseDir, archiveBaseDir, o.Options.LocalStorageDisk)
 		if err != nil {
-			o.Log.Error(" %v ", err)
+			o.Log.Error(" %w ", err)
 			return err
 		}
 		err = extractor.Unarchive()
 		if err != nil {
-			o.Log.Error(" %v ", err)
+			o.Log.Error(" %w ", err)
 			return err
 		}
 	}
@@ -90,19 +90,23 @@ func (o MirrorFlowController) Process(args []string) error {
 	// setup all dependencies
 	// use interface segregation
 	// use dependency inversion
-	catalog := operator.NewRebuildCatalog(o.Context, o.Log, cfg.(v2alpha1.ImageSetConfiguration), o.Options)
-	mirror := mirror.New(o.Context, o.Log, o.Options)
-	collectManager := collector.New(o.Context, o.Log, cfg.(v2alpha1.ImageSetConfiguration), o.Options)
-	releaseCollector := release.New(o.Context, o.Log, mirror, cfg.(v2alpha1.ImageSetConfiguration), o.Options)
-	additionalCollector := additional.New(o.Context, o.Log, cfg.(v2alpha1.ImageSetConfiguration), o.Options)
-	operatorCollector := operator.New(o.Context, o.Log, mirror, cfg.(v2alpha1.ImageSetConfiguration), o.Options)
-	helmCollector := helm.New(o.Context, o.Log, cfg.(v2alpha1.ImageSetConfiguration), o.Options)
-	clusterRes := clusterresources.New(o.Log, cfg.(v2alpha1.ImageSetConfiguration), o.Options)
-	graph := release.NewGraphUpdate(o.Context, o.Log, cfg.(v2alpha1.ImageSetConfiguration), o.Options)
-	dryRun := NewDryRun(o.Context, o.Log, o.Options)
+	catalog := operator.NewRebuildCatalog(o.Log, cfg.(v2alpha1.ImageSetConfiguration), o.Options)
+	mirror := mirror.New(o.Log, o.Options)
+	collectManager := collector.New(o.Log, cfg.(v2alpha1.ImageSetConfiguration), o.Options)
+	releaseCollector := release.New(o.Log, mirror, cfg.(v2alpha1.ImageSetConfiguration), o.Options)
+	additionalCollector := additional.New(o.Log, cfg.(v2alpha1.ImageSetConfiguration), o.Options)
+	operatorCollector := operator.New(o.Log, mirror, cfg.(v2alpha1.ImageSetConfiguration), o.Options)
+	helmCollector := helm.New(o.Log, cfg.(v2alpha1.ImageSetConfiguration), o.Options)
+	graph := release.NewGraphUpdate(o.Log, cfg.(v2alpha1.ImageSetConfiguration), o.Options)
+	dryRun := NewDryRun(o.Log, o.Options)
 
-	localStorage := LocalStorage{Log: o.Log, Options: o.Options, Context: o.Context}
-	localStorage.Setup()
+	ctx := context.Background()
+	localStorage := LocalStorage{Log: o.Log, Options: o.Options}
+	err = localStorage.Setup()
+	if err != nil {
+		o.Log.Error(" %w ", err)
+		return err
+	}
 
 	go localStorage.StartLocalRegistry()
 
@@ -124,90 +128,124 @@ func (o MirrorFlowController) Process(args []string) error {
 	if o.Options.DryRun {
 		err := dryRun.Process(copiedImages.AllImages)
 		if err != nil {
-			return nil
+			return err
 		}
-	} else {
-		if o.Options.MaxNestedPaths > 0 {
-			copiedImages.AllImages, err = withMaxNestedPaths(copiedImages.AllImages, o.Options.MaxNestedPaths)
-			if err != nil {
-				return err
-			}
-		}
+		return nil
+	}
+	copiedImages.AllImages, err = withMaxNestedPaths(copiedImages.AllImages, o.Options.MaxNestedPaths)
+	if err != nil {
+		return err
+	}
 
-		copiedImages.AllImages = excludeImages(copiedImages.AllImages, cfg.(v2alpha1.ImageSetConfiguration).Mirror.BlockedImages)
+	copiedImages.AllImages = excludeImages(copiedImages.AllImages, cfg.(v2alpha1.ImageSetConfiguration).Mirror.BlockedImages)
 
-		err = catalog.Rebuild(copiedImages)
-		if err != nil {
-			o.Log.Warn("%v", err)
-		}
+	err = catalog.Rebuild(copiedImages)
+	if err != nil {
+		o.Log.Warn("%v", err)
+	}
 
-		// batch all images
-		_, err = batch.Worker(o.Context, copiedImages, o.Options)
+	// batch all images
+	_, err = batch.Worker(ctx, copiedImages, o.Options)
+	if err != nil {
+		return err
+	}
+
+	graphImage, err := graph.Create(graphURL)
+	if err != nil {
+		return err
+	}
+
+	err = o.postMirrorProcessM2D(ctx, copiedImages, allCollectorSchema, cfg.(v2alpha1.ImageSetConfiguration), graphImage)
+	if err != nil {
+		return err
+	}
+
+	err = o.postMirrorProcessAny2M(ctx, copiedImages, allCollectorSchema, cfg.(v2alpha1.ImageSetConfiguration), graphImage)
+	if err != nil {
+		return err
+	}
+
+	localStorage.StopLocalRegistry()
+	o.Log.Info(emoji.WavingHandSign + " Goodbye, thank you for using oc-mirror")
+	return nil
+}
+
+// postMirrorProcessM2D
+func (o MirrorFlowController) postMirrorProcessM2D(ctx context.Context, copiedImages v2alpha1.CollectorSchema, allCollectorSchema []v2alpha1.CollectorSchema, cfg v2alpha1.ImageSetConfiguration, graphImage string) error {
+	// post batch process
+	if o.Options.IsMirrorToDisk() {
+		copiedSchema, err := addRebuiltCatalogs(copiedImages)
 		if err != nil {
 			return err
 		}
-
-		graphImage, err := graph.Create(graphURL)
+		err = o.createAndBuildArchive(ctx, copiedSchema, cfg)
 		if err != nil {
 			return err
 		}
+		return nil
+	}
+	return nil
+}
 
-		// post batch process
-		if o.Options.IsMirrorToDisk() {
-			copiedSchema, err := addRebuiltCatalogs(copiedImages)
-			if err != nil {
-				return err
-			}
-			maxSize := cfg.(v2alpha1.ImageSetConfiguration).ImageSetConfigurationSpec.ArchiveSize
-			archiver, err := archive.NewPermissiveMirrorArchive(o.Options, o.Log, maxSize)
-			if err != nil {
-				return err
-			}
-			o.Log.Info(emoji.Package + " Preparing the tarball archive...")
-			err = archiver.BuildArchive(o.Context, copiedSchema.AllImages)
-			if err != nil {
-				return err
-			}
-			return nil
-		} else {
-			// create all relevant cluster resources
-			// create IDMS/ITMS
-			forceRepositoryScope := o.Options.MaxNestedPaths > 0
-			err = clusterRes.IDMS_ITMSGenerator(copiedImages.AllImages, forceRepositoryScope)
-			if err != nil {
-				return err
-			}
+func (o MirrorFlowController) postMirrorProcessAny2M(ctx context.Context, copiedImages v2alpha1.CollectorSchema, allCollectorSchema []v2alpha1.CollectorSchema, cfg v2alpha1.ImageSetConfiguration, graphImage string) error {
+	// drop here if disk-to-mirror or mirror-to-mirror
+	// create all relevant cluster resources
+	// create IDMS/ITMS
+	errs := []error{}
+	if o.Options.IsDiskToMirror() || o.Options.IsMirrorToMirror() {
+		clusterRes := clusterresources.New(o.Log, cfg, o.Options)
+		forceRepositoryScope := o.Options.MaxNestedPaths > 0
+		err := clusterRes.IDMS_ITMSGenerator(copiedImages.AllImages, forceRepositoryScope)
+		errs = append(errs, err)
 
-			err = clusterRes.CatalogSourceGenerator(copiedImages.AllImages)
-			if err != nil {
-				return err
-			}
+		err = clusterRes.CatalogSourceGenerator(copiedImages.AllImages)
+		errs = append(errs, err)
 
-			if err := clusterRes.ClusterCatalogGenerator(copiedImages.AllImages); err != nil {
-				return err
-			}
+		err = clusterRes.ClusterCatalogGenerator(copiedImages.AllImages)
+		errs = append(errs, err)
 
-			err = clusterRes.GenerateSignatureConfigMap(copiedImages.AllImages)
-			if err != nil {
-				// as this is not a seriously fatal error we just log the error
-				o.Log.Warn("%s", err)
-			}
-
-			if len(graphImage) > 0 {
-				releaseImage, err := findFirstRelease(allCollectorSchema)
-				if err != nil {
-					return err
-				}
-				err = clusterRes.UpdateServiceGenerator(graphImage, releaseImage.Destination)
-				if err != nil {
-					return err
-				}
-			}
-
+		err = clusterRes.GenerateSignatureConfigMap(copiedImages.AllImages)
+		if err != nil {
+			// as this is not a seriously fatal error we just log the error
+			o.Log.Warn("%s", err)
 		}
 
-		localStorage.StopLocalRegistry()
-		o.Log.Info(emoji.WavingHandSign + " Goodbye, thank you for using oc-mirror")
+		err = checkAndBuildGraph(clusterRes, graphImage, allCollectorSchema)
+		errs = append(errs, err)
+
+		for _, e := range errs {
+			if e != nil {
+				return e
+			}
+		}
+	}
+	return nil
+}
+
+func (o MirrorFlowController) createAndBuildArchive(ctx context.Context, copiedSchema v2alpha1.CollectorSchema, cfg v2alpha1.ImageSetConfiguration) error {
+	maxSize := cfg.ImageSetConfigurationSpec.ArchiveSize
+	archiver, err := archive.NewPermissiveMirrorArchive(o.Options, o.Log, maxSize)
+	if err != nil {
+		return err
+	}
+	o.Log.Info(emoji.Package + " Preparing the tarball archive...")
+	err = archiver.BuildArchive(ctx, copiedSchema.AllImages)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func checkAndBuildGraph(clusterRes clusterresources.GeneratorInterface, graphImage string, allCollectorSchema []v2alpha1.CollectorSchema) error {
+	if len(graphImage) > 0 {
+		releaseImage, err := findFirstRelease(allCollectorSchema)
+		if err != nil {
+			return err
+		}
+		err = clusterRes.UpdateServiceGenerator(graphImage, releaseImage.Destination)
+		if err != nil {
+			return err
+		}
 		return nil
 	}
 	return nil
@@ -215,13 +253,14 @@ func (o MirrorFlowController) Process(args []string) error {
 
 // utility helper functions
 // TODO: refactor these utilities in their appropriate pkgs
+
 // getUpdatedCopiedImages
 func getUpdatedCopiedImages(cs []v2alpha1.CollectorSchema) v2alpha1.CollectorSchema {
 	result := v2alpha1.CollectorSchema{}
 	for _, v := range cs {
 		for _, img := range v.AllImages {
 			switch img.Type {
-			case v2alpha1.TypeCincinnatiGraph, v2alpha1.TypeOCPRelease, v2alpha1.TypeOCPReleaseContent:
+			case v2alpha1.TypeCincinnatiGraph, v2alpha1.TypeOCPRelease, v2alpha1.TypeOCPReleaseContent, v2alpha1.TypeKubeVirtContainer:
 				result.TotalReleaseImages++
 			case v2alpha1.TypeGeneric:
 				result.TotalAdditionalImages++
@@ -233,6 +272,7 @@ func getUpdatedCopiedImages(cs []v2alpha1.CollectorSchema) v2alpha1.CollectorSch
 				result.TotalOperatorImages++
 			case v2alpha1.TypeHelmImage:
 				result.TotalHelmImages++
+			case v2alpha1.TypeInvalid:
 			}
 		}
 		result.AllImages = append(result.AllImages, v.AllImages...)
@@ -246,7 +286,7 @@ func addRebuiltCatalogs(cs v2alpha1.CollectorSchema) (v2alpha1.CollectorSchema, 
 		if ci.Type == v2alpha1.TypeOperatorCatalog && ci.RebuiltTag != "" {
 			imgSpec, err := image.ParseRef(ci.Destination)
 			if err != nil {
-				return cs, fmt.Errorf("unable to add rebuilt catalog for %s: %v", ci.Origin, err)
+				return cs, fmt.Errorf("unable to add rebuilt catalog for %s: %w", ci.Origin, err)
 			}
 			imgSpec = imgSpec.SetTag(ci.RebuiltTag)
 			rebuiltCI := v2alpha1.CopyImageSchema{
@@ -265,8 +305,7 @@ func addRebuiltCatalogs(cs v2alpha1.CollectorSchema) (v2alpha1.CollectorSchema, 
 func findFirstRelease(cs []v2alpha1.CollectorSchema) (v2alpha1.CopyImageSchema, error) {
 	for _, v := range cs {
 		for _, img := range v.AllImages {
-			switch img.Type {
-			case v2alpha1.TypeOCPRelease:
+			if img.Type == v2alpha1.TypeOCPRelease {
 				return img, nil
 			}
 		}
@@ -277,13 +316,15 @@ func findFirstRelease(cs []v2alpha1.CollectorSchema) (v2alpha1.CopyImageSchema, 
 // withMaxNestedPaths()
 func withMaxNestedPaths(in []v2alpha1.CopyImageSchema, maxNestedPaths int) ([]v2alpha1.CopyImageSchema, error) {
 	out := []v2alpha1.CopyImageSchema{}
-	for _, img := range in {
-		dst, err := image.WithMaxNestedPaths(img.Destination, maxNestedPaths)
-		if err != nil {
-			return nil, err
+	if maxNestedPaths > 0 {
+		for _, img := range in {
+			dst, err := image.WithMaxNestedPaths(img.Destination, maxNestedPaths)
+			if err != nil {
+				return nil, err
+			}
+			img.Destination = dst
+			out = append(out, img)
 		}
-		img.Destination = dst
-		out = append(out, img)
 	}
 	return out, nil
 }

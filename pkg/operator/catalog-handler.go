@@ -26,11 +26,11 @@ func setInternalLog(log clog.PluggableLoggerInterface) {
 
 func (o catalogHandler) getDeclarativeConfig(filePath string) (*declcfg.DeclarativeConfig, error) {
 	setInternalLog(o.Log)
-	return declcfg.LoadFS(context.Background(), os.DirFS(filePath))
+	return declcfg.LoadFS(context.Background(), os.DirFS(filePath)) // nolint: wrapcheck
 }
 
 func saveDeclarativeConfig(fbc declcfg.DeclarativeConfig, path string) error {
-	return declcfg.WriteFS(fbc, path, declcfg.WriteJSON, ".json")
+	return declcfg.WriteFS(fbc, path, declcfg.WriteJSON, ".json") // nolint: wrapcheck
 }
 
 func filterFromImageSetConfig(iscCatalogFilter v2alpha1.Operator) (filter.FilterConfiguration, error) {
@@ -74,6 +74,7 @@ func filterFromImageSetConfig(iscCatalogFilter v2alpha1.Operator) (filter.Filter
 			catFilter.Packages = append(catFilter.Packages, p)
 		}
 	}
+	// nolint: wrapcheck
 	return catFilter, catFilter.Validate()
 }
 
@@ -83,6 +84,7 @@ func filterCatalog(ctx context.Context, operatorCatalog declcfg.DeclarativeConfi
 		return nil, err
 	}
 	ctlgFilter := filter.NewMirrorFilter(config, []filter.FilterOption{filter.InFull(iscCatalogFilter.Full)}...)
+	// nolint: wrapcheck
 	return ctlgFilter.FilterCatalog(ctx, &operatorCatalog)
 }
 
@@ -132,7 +134,7 @@ func (o catalogHandler) getCatalog(filePath string) (OperatorCatalog, error) {
 		}
 	}
 
-	return operatorCatalog, err
+	return operatorCatalog, fmt.Errorf("%w", err)
 }
 
 func (o catalogHandler) filterRelatedImagesFromCatalog(operatorCatalog OperatorCatalog, ctlgInIsc v2alpha1.Operator, copyImageSchemaMap *v2alpha1.CopyImageSchemaMap) (map[string][]v2alpha1.RelatedImage, error) {
@@ -148,7 +150,7 @@ func (o catalogHandler) filterRelatedImagesFromCatalog(operatorCatalog OperatorC
 			ri, err := getRelatedImages(operatorName, operatorConfig, v2alpha1.IncludePackage{}, ctlgInIsc.Full, copyImageSchemaMap)
 
 			if err != nil {
-				return relatedImages, err
+				return relatedImages, fmt.Errorf("%w", err)
 			}
 
 			maps.Copy(relatedImages, ri)
@@ -162,7 +164,7 @@ func (o catalogHandler) filterRelatedImagesFromCatalog(operatorCatalog OperatorC
 			}
 			ri, err := getRelatedImages(iscOperator.Name, operatorConfig, iscOperator, ctlgInIsc.Full, copyImageSchemaMap)
 			if err != nil {
-				return relatedImages, err
+				return relatedImages, fmt.Errorf("%w", err)
 			}
 			if len(ri) == 0 {
 				o.Log.Warn("[OperatorImageCollector] no bundles matching filtering for %s in catalog %s", iscOperator.Name, ctlgInIsc.Catalog)
@@ -225,7 +227,7 @@ func parseOperatorCatalogByOperator(operatorName string, operatorCatalog Operato
 func getRelatedImages(operatorName string, operatorConfig OperatorCatalog, iscOperator v2alpha1.IncludePackage, full bool, copyImageSchemaMap *v2alpha1.CopyImageSchemaMap) (map[string][]v2alpha1.RelatedImage, error) {
 	invalid, err := isInvalidFiltering(iscOperator, full)
 	if invalid {
-		return nil, err
+		return nil, fmt.Errorf("%w", err)
 	}
 
 	relatedImages := make(map[string][]v2alpha1.RelatedImage)
@@ -306,14 +308,14 @@ func filterBundles(channelEntries map[string]declcfg.ChannelEntry, min string, m
 	if min != "" {
 		minVersion, err = semver.ParseTolerant(min)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w", err)
 		}
 	}
 
 	if max != "" {
 		maxVersion, err = semver.ParseTolerant(max)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w", err)
 		}
 	}
 
@@ -348,7 +350,7 @@ func filterBundles(channelEntries map[string]declcfg.ChannelEntry, min string, m
 			currentHeadName = chEntry.Name
 		}
 
-		//Include this bundle to the filtered list if:
+		// Include this bundle to the filtered list if:
 		// * its version is prerelease of an already included bundle
 		// * its version is between min and max (both defined)
 		// * its version is greater than min (defined), and no max is defined (which means up to channel head)
@@ -391,10 +393,10 @@ func getChannelEntrySemVer(chEntryName string) (semver.Version, error) {
 
 	version, err := semver.ParseTolerant(strings.Join(nameSplit[1:], "."))
 	if err != nil {
-		return semver.Version{}, fmt.Errorf("%s %v", chEntryName, err)
+		return semver.Version{}, fmt.Errorf("%s %w", chEntryName, err)
 	}
 
-	return version, err
+	return version, fmt.Errorf("%w", err)
 }
 
 func isPreRelease(version semver.Version) bool {
@@ -420,7 +422,7 @@ func isPreReleaseOfFilteredVersion(version string, chEntryName string, filteredV
 }
 
 func handleRelatedImages(bundle declcfg.Bundle, operatorName string, copyImageSchemaMap *v2alpha1.CopyImageSchemaMap) ([]v2alpha1.RelatedImage, error) {
-	var relatedImages []v2alpha1.RelatedImage
+	relatedImages := []v2alpha1.RelatedImage{}
 
 	for _, ri := range bundle.RelatedImages {
 		if strings.Contains(ri.Image, "oci://") {

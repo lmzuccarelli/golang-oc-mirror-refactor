@@ -3,6 +3,7 @@ package v2alpha1
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 )
 
 // DefaultPlatformArchitecture defines the default
@@ -11,6 +12,7 @@ import (
 const DefaultPlatformArchitecture = "amd64"
 
 // PlatformType defines the content type for platforms
+// nolint: recvcheck
 type PlatformType int
 
 // TypeOCP is default
@@ -38,16 +40,18 @@ func (pt PlatformType) String() string {
 // MarshalJSON marshals the PlatformType as a quoted json string
 func (pt PlatformType) MarshalJSON() ([]byte, error) {
 	if err := pt.validate(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w", err)
 	}
+	// nolint: wrapcheck
 	return json.Marshal(pt.String())
 }
 
 // UnmarshalJSON unmarshals a quoted json string to the PlatformType
+// nolint: recvcheck
 func (pt *PlatformType) UnmarshalJSON(b []byte) error {
 	var j string
 	if err := json.Unmarshal(b, &j); err != nil {
-		return err
+		return fmt.Errorf("%w", err)
 	}
 
 	*pt = platformStringsType[j]

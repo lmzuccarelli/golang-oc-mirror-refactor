@@ -1,9 +1,7 @@
 package cli
 
 import (
-	"context"
 	"fmt"
-	"path/filepath"
 
 	"github.com/lmzuccarelli/golang-oc-mirror-refactor/pkg/additional"
 	"github.com/lmzuccarelli/golang-oc-mirror-refactor/pkg/api/v2alpha1"
@@ -22,22 +20,23 @@ import (
 )
 
 type DeleteFlowController struct {
-	Log     clog.PluggableLoggerInterface
-	Options *common.MirrorOptions
-	Context context.Context
+	Log      clog.PluggableLoggerInterface
+	Options  *common.MirrorOptions
+	Validate ValidateInterface
+	Setup    SetupInterface
 }
 
-func NewDeleteFlowController(ctx context.Context, log clog.PluggableLoggerInterface, opts *common.MirrorOptions) FlowControllerInterface {
+func NewDeleteFlowController(log clog.PluggableLoggerInterface, opts *common.MirrorOptions, validate ValidateInterface, setup SetupInterface) DeleteFlowController {
 	return DeleteFlowController{
-		Context: ctx,
-		Log:     log,
-		Options: opts,
+		Log:      log,
+		Options:  opts,
+		Validate: validate,
+		Setup:    setup,
 	}
 }
 
 func (o DeleteFlowController) Process(args []string) error {
-	validate := DeleteValidate{Log: o.Log, Options: o.Options}
-	err := validate.CheckArgs(args)
+	err := o.Validate.CheckArgs(args)
 	if err != nil {
 		return fmt.Errorf("validation failed %s", err.Error())
 	}
@@ -70,33 +69,39 @@ func (o DeleteFlowController) Process(args []string) error {
 	// ensure mirror and batch worker use delete logic
 	o.Log.Info(emoji.TwistedRighwardsArrows+" workflow mode: %s / %s", o.Options.Mode, o.Options.Function)
 
-	if o.Options.DeleteGenerate {
-		absPath, err := filepath.Abs(o.Options.WorkingDir + deleteDir)
-		if err != nil {
-			o.Log.Error("absolute path %v", err)
+	/*
+		if o.Options.DeleteGenerate {
+			absPath, err := filepath.Abs(o.Options.WorkingDir + deleteDir)
+			if err != nil {
+				o.Log.Error("absolute path %v", err)
+			}
+			if len(o.Options.DeleteID) > 0 {
+				o.Log.Debug("using id %s to update all delete generated files", o.Options.DeleteID)
+			}
+			o.Log.Debug("generate flag set, files will be created in %s", absPath)
 		}
-		if len(o.Options.DeleteID) > 0 {
-			o.Log.Debug("using id %s to update all delete generated files", o.Options.DeleteID)
+
+		if o.Options.ForceCacheDelete && !o.Options.DeleteGenerate {
+			o.Log.Debug("force-cache-delete flag set, cache deletion will be forced")
 		}
-		o.Log.Debug("generate flag set, files will be created in %s", absPath)
-	}
+	*/
 
-	if o.Options.ForceCacheDelete && !o.Options.DeleteGenerate {
-		o.Log.Debug("force-cache-delete flag set, cache deletion will be forced")
-	}
-
-	mirror := mirror.New(o.Context, o.Log, o.Options)
+	mirror := mirror.New(o.Log, o.Options)
 	batch := batch.New(o.Log, o.Options.WorkingDir+"/logs", mirror, 8)
 	bg := archive.NewImageBlobGatherer(o.Options)
-	collectManager := collector.New(o.Context, o.Log, isc, o.Options)
-	releaseCollector := release.New(o.Context, o.Log, mirror, isc, o.Options)
-	additionalCollector := additional.New(o.Context, o.Log, isc, o.Options)
-	operatorCollector := operator.New(o.Context, o.Log, mirror, isc, o.Options)
-	helmCollector := helm.New(o.Context, o.Log, isc, o.Options)
-	deleteReg := delete.New(o.Context, o.Log, o.Options, batch, bg, cfg.(v2alpha1.DeleteImageSetConfiguration))
+	collectManager := collector.New(o.Log, isc, o.Options)
+	releaseCollector := release.New(o.Log, mirror, isc, o.Options)
+	additionalCollector := additional.New(o.Log, isc, o.Options)
+	operatorCollector := operator.New(o.Log, mirror, isc, o.Options)
+	helmCollector := helm.New(o.Log, isc, o.Options)
+	deleteReg := delete.New(o.Log, o.Options, batch, bg, cfg.(v2alpha1.DeleteImageSetConfiguration))
 
-	localStorage := LocalStorage{Log: o.Log, Options: o.Options, Context: o.Context}
-	localStorage.Setup()
+	localStorage := LocalStorage{Log: o.Log, Options: o.Options}
+	err = localStorage.Setup()
+	if err != nil {
+		return err
+	}
+
 	go localStorage.StartLocalRegistry()
 
 	// use single responsibility principle

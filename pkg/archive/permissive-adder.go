@@ -31,14 +31,14 @@ func newPermissiveAdder(maxSize int64, destination string, logger clog.Pluggable
 	archiveFileName := fmt.Sprintf(archiveFileNameFormat, archiveFilePrefix, chunk)
 	err := os.MkdirAll(destination, 0755)
 	if err != nil {
-		return &permissiveAdder{}, err
+		return &permissiveAdder{}, fmt.Errorf("%w", err)
 	}
 	archivePath := filepath.Join(destination, archiveFileName)
 	// Create a new tar archive file
 	// to be closed by BuildArchive
 	archiveFile, err := os.Create(archivePath)
 	if err != nil {
-		return &permissiveAdder{}, err
+		return &permissiveAdder{}, fmt.Errorf("%w", err)
 	}
 	// Create a new tar writer
 	// to be closed by BuildArchive
@@ -82,7 +82,7 @@ func (o *permissiveAdder) close() error {
 	if err != nil {
 		o.logger.Warn("error closing archive writer : %v", err)
 	}
-	return o.archiveFile.Close()
+	return fmt.Errorf("%w", o.archiveFile.Close())
 
 }
 
@@ -95,7 +95,7 @@ func (o *permissiveAdder) close() error {
 func (o *permissiveAdder) addFile(pathToFile string, pathInTar string) error {
 	fi, err := os.Stat(pathToFile)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w", err)
 	}
 
 	// when a file is already bigger than the maxArchiveSize, it will not fit any chunk.
@@ -110,12 +110,12 @@ func (o *permissiveAdder) addFile(pathToFile string, pathInTar string) error {
 	if fi.Size()+o.sizeOfCurrentChunk > o.maxArchiveSize {
 		err = o.nextChunk()
 		if err != nil {
-			return err
+			return fmt.Errorf("%w", err)
 		}
 	}
 	err = addFileToWriter(fi, pathToFile, pathInTar, o.tarWriter)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w", err)
 	}
 
 	o.sizeOfCurrentChunk += fi.Size()
@@ -129,9 +129,10 @@ func (o *permissiveAdder) addFile(pathToFile string, pathInTar string) error {
 // When encountering a file whose size is greater than maxArchiveSize,
 // this file will be placed in an exceptionChunk and marked oversized.
 func (o *permissiveAdder) addAllFolder(folderToAdd string, relativeTo string) error {
+	// nolint: wrapcheck
 	return filepath.Walk(folderToAdd, func(path string, info os.FileInfo, incomingError error) error {
 		if incomingError != nil {
-			return incomingError
+			return fmt.Errorf("%w", incomingError)
 		}
 		if info.IsDir() { // skip directories
 			return nil
@@ -143,7 +144,7 @@ func (o *permissiveAdder) addAllFolder(folderToAdd string, relativeTo string) er
 			o.oversizedFiles[path] = info.Size()
 			fileNameInArchive, err := filepath.Rel(relativeTo, path)
 			if err != nil {
-				return err
+				return fmt.Errorf("%w", err)
 			}
 			return o.exceptionChunk(info, path, fileNameInArchive)
 
@@ -152,7 +153,7 @@ func (o *permissiveAdder) addAllFolder(folderToAdd string, relativeTo string) er
 		if info.Size()+o.sizeOfCurrentChunk > o.maxArchiveSize {
 			err := o.nextChunk()
 			if err != nil {
-				return err
+				return fmt.Errorf("%w", err)
 			}
 		}
 
@@ -162,12 +163,12 @@ func (o *permissiveAdder) addAllFolder(folderToAdd string, relativeTo string) er
 		// https://golang.org/src/archive/tar/common.go?#L626
 		pathInTar, err := filepath.Rel(relativeTo, path)
 		if err != nil {
-			return err
+			return fmt.Errorf("%w", err)
 		}
 
 		err = addFileToWriter(info, path, pathInTar, o.tarWriter)
 		if err != nil {
-			return err
+			return fmt.Errorf("%w", err)
 		}
 
 		o.sizeOfCurrentChunk += info.Size()
@@ -183,11 +184,11 @@ func (o *permissiveAdder) nextChunk() error {
 	// close the current archive
 	err := o.tarWriter.Close()
 	if err != nil {
-		return err
+		return fmt.Errorf("%w", err)
 	}
 	err = o.archiveFile.Close()
 	if err != nil {
-		return err
+		return fmt.Errorf("%w", err)
 	}
 
 	// next chunk init
@@ -201,7 +202,7 @@ func (o *permissiveAdder) nextChunk() error {
 
 	o.archiveFile, err = os.Create(archivePath)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w", err)
 	}
 	o.tarWriter = tar.NewWriter(o.archiveFile)
 	return nil
@@ -219,7 +220,7 @@ func (o *permissiveAdder) exceptionChunk(oversizedFileInfo fs.FileInfo, oversize
 
 	exceptionArchiveFile, err := os.Create(exceptionArchivePath)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w", err)
 	}
 	exceptionTarWriter := tar.NewWriter(exceptionArchiveFile)
 
@@ -233,23 +234,23 @@ func (o *permissiveAdder) exceptionChunk(oversizedFileInfo fs.FileInfo, oversize
 	// create the header for the file
 	header, err := tar.FileInfoHeader(oversizedFileInfo, oversizedFileInfo.Name())
 	if err != nil {
-		return err
+		return fmt.Errorf("%w", err)
 	}
 	header.Name = pathInTar
 
 	if err := exceptionTarWriter.WriteHeader(header); err != nil {
-		return err
+		return fmt.Errorf("%w", err)
 	}
 	// Open the file for reading
 	file, err := os.Open(oversizedFilePath)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w", err)
 	}
 	defer file.Close()
 
 	// Copy the file contents to the tar archive
 	if _, err := io.Copy(exceptionTarWriter, file); err != nil {
-		return err
+		return fmt.Errorf("%w", err)
 	}
 
 	return nil

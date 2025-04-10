@@ -1,7 +1,6 @@
 package v2alpha1
 
-//import "k8s.io/apimachinery/pkg/runtime/schema"
-
+// nolint: unused
 const (
 	version = "v2alpha1"
 	group   = "mirror.openshift.io"
@@ -13,6 +12,7 @@ type GroupVersion struct {
 	Version string
 }
 
+// nolint: unused
 var (
 	groupVersion = GroupVersion{Group: group, Version: version}
 )

@@ -3,6 +3,7 @@ package common
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -104,6 +105,7 @@ type ErrorShouldDisplayUsage struct {
 func (opts MirrorOptions) GetPolicyContext() (*signature.PolicyContext, error) {
 	var policy *signature.Policy // This could be cached across calls in opts.
 	var err error
+	// nolint: gocritic
 	if !opts.SecurePolicy {
 		policy = &signature.Policy{Default: []signature.PolicyRequirement{signature.NewPRInsecureAcceptAnything()}}
 	} else if opts.PolicyPath == "" {
@@ -112,8 +114,9 @@ func (opts MirrorOptions) GetPolicyContext() (*signature.PolicyContext, error) {
 		policy, err = signature.NewPolicyFromFile(opts.PolicyPath)
 	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w", err)
 	}
+	// nolint: wrapcheck
 	return signature.NewPolicyContext(policy)
 }
 
@@ -151,6 +154,7 @@ func (opts MirrorOptions) NewSystemContext() *types.SystemContext {
 	return ctx
 }
 
+// nolint: unused
 func parseCreds(creds string) (string, string, error) {
 	if creds == "" {
 		return "", "", errors.New("credentials can't be empty")
@@ -165,6 +169,7 @@ func parseCreds(creds string) (string, string, error) {
 	return up[0], up[1], nil
 }
 
+// nolint: unused
 func getDockerAuth(creds string) (*types.DockerAuthConfig, error) {
 	username, password, err := parseCreds(creds)
 	if err != nil {

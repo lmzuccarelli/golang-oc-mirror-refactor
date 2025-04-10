@@ -9,16 +9,15 @@ import (
 
 	"github.com/containers/common/pkg/retry"
 	"github.com/containers/image/v5/copy"
-	"github.com/containers/image/v5/pkg/cli"
-
 	"github.com/containers/image/v5/manifest"
+	"github.com/containers/image/v5/pkg/cli"
 	"github.com/containers/image/v5/transports/alltransports"
 	"github.com/containers/image/v5/types"
 	"github.com/distribution/reference"
-	//"github.com/lmzuccarelli/golang-oc-mirror-refactor/pkg/api/v2alpha1"
+	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
+
 	"github.com/lmzuccarelli/golang-oc-mirror-refactor/pkg/common"
 	clog "github.com/lmzuccarelli/golang-oc-mirror-refactor/pkg/log"
-	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
 type Mode string
@@ -31,23 +30,22 @@ type MirrorInterface interface {
 type MirrorController struct {
 	Log     clog.PluggableLoggerInterface
 	Options *common.MirrorOptions
-	Context context.Context
 }
 
-func New(ctx context.Context, log clog.PluggableLoggerInterface, opts *common.MirrorOptions) MirrorInterface {
-	mirror := MirrorController{Context: ctx, Log: log, Options: opts}
+func New(log clog.PluggableLoggerInterface, opts *common.MirrorOptions) MirrorController {
+	mirror := MirrorController{Log: log, Options: opts}
 	return mirror
 }
 
 func (o MirrorController) Copy(ctx context.Context, src, dest string, opts *common.MirrorOptions) (retErr error) {
 
 	if err := ReexecIfNecessaryForImages([]string{src, dest}...); err != nil {
-		return err
+		return fmt.Errorf("%w", err)
 	}
 
 	policyContext, err := opts.GetPolicyContext()
 	if err != nil {
-		return fmt.Errorf("error loading trust policy: %v", err)
+		return fmt.Errorf("error loading trust policy: %w", err)
 	}
 	defer func() {
 		if err := policyContext.Destroy(); err != nil {
@@ -57,25 +55,19 @@ func (o MirrorController) Copy(ctx context.Context, src, dest string, opts *comm
 
 	srcRef, err := alltransports.ParseImageName(src)
 	if err != nil {
-		return fmt.Errorf("invalid source name %s: %v", src, err)
+		return fmt.Errorf("invalid source name %s: %w", src, err)
 	}
 	destRef, err := alltransports.ParseImageName(dest)
 	if err != nil {
-		return fmt.Errorf("invalid destination name %s: %v", dest, err)
+		return fmt.Errorf("invalid destination name %s: %w", dest, err)
 	}
 
 	sourceCtx := opts.NewSystemContext()
-	//if err != nil {
-	//	return err
-	//}
 	if strings.Contains(src, opts.LocalStorageFQDN) { // when copying from cache, use HTTP
 		sourceCtx.DockerInsecureSkipTLSVerify = types.OptionalBoolTrue
 	}
 
 	destinationCtx := opts.NewSystemContext()
-	//if err != nil {
-	//	return err
-	//}
 
 	if strings.Contains(dest, opts.LocalStorageFQDN) {
 		// when copying to cache, use HTTP
@@ -86,7 +78,7 @@ func (o MirrorController) Copy(ctx context.Context, src, dest string, opts *comm
 	if len(opts.Format) > 0 {
 		manifestType, err = ParseManifestFormat(opts.Format)
 		if err != nil {
-			return err
+			return fmt.Errorf("%w", err)
 		}
 	}
 
@@ -98,7 +90,7 @@ func (o MirrorController) Copy(ctx context.Context, src, dest string, opts *comm
 	if len(opts.MultiArch) > 0 {
 		imageListSelection, err = parseMultiArch(opts.MultiArch)
 		if err != nil {
-			return err
+			return fmt.Errorf("%w", err)
 		}
 	}
 
@@ -120,7 +112,7 @@ func (o MirrorController) Copy(ctx context.Context, src, dest string, opts *comm
 	if opts.SignPassphraseFile != "" {
 		p, err := cli.ReadPassphraseFile(opts.SignPassphraseFile)
 		if err != nil {
-			return err
+			return fmt.Errorf("%w", err)
 		}
 		passphrase = p
 	}
@@ -131,7 +123,7 @@ func (o MirrorController) Copy(ctx context.Context, src, dest string, opts *comm
 	if opts.SignIdentity != "" {
 		signIdentity, err = reference.ParseNamed(opts.SignIdentity)
 		if err != nil {
-			return fmt.Errorf("could not parse --sign-identity: %v", err)
+			return fmt.Errorf("could not parse --sign-identity: %w", err)
 		}
 	}
 
@@ -149,24 +141,26 @@ func (o MirrorController) Copy(ctx context.Context, src, dest string, opts *comm
 		ForceManifestMIMEType:            manifestType,
 		ImageListSelection:               imageListSelection,
 		PreserveDigests:                  opts.PreserveDigests,
-		MaxParallelDownloads:             uint(opts.ParallelLayerImages),
+		MaxParallelDownloads:             uint(opts.ParallelLayerImages), // #nosec G115
 	}
 
 	if opts.LogLevel == "debug" {
 		co.ReportWriter = opts.Stdout
 	}
 
+	// nolint: wrapcheck
 	return retry.IfNecessary(ctx, func() error {
 
 		manifestBytes, err := copy.Image(ctx, policyContext, destRef, srcRef, co)
 		if err != nil {
-			return err
+			return fmt.Errorf("%w", err)
 		}
 		if opts.DigestFile != "" {
 			manifestDigest, err := manifest.Digest(manifestBytes)
 			if err != nil {
-				return err
+				return fmt.Errorf("%w", err)
 			}
+			// #nosec G306
 			if err = os.WriteFile(opts.DigestFile, []byte(manifestDigest.String()), 0644); err != nil {
 				return fmt.Errorf("failed to write digest to file %q: %w", opts.DigestFile, err)
 			}
@@ -179,37 +173,37 @@ func (o MirrorController) Copy(ctx context.Context, src, dest string, opts *comm
 func Check(ctx context.Context, image string, opts *common.MirrorOptions, asCopySrc bool) (bool, error) {
 
 	if err := ReexecIfNecessaryForImages([]string{image}...); err != nil {
-		return false, err
+		return false, fmt.Errorf("%w", err)
 	}
 
 	imageRef, err := alltransports.ParseImageName(image)
 	if err != nil {
-		return false, fmt.Errorf("invalid source name %s: %v", image, err)
+		return false, fmt.Errorf("invalid source name %s: %w", image, err)
 	}
 	var sysCtx *types.SystemContext
 	if asCopySrc {
 		sysCtx = opts.NewSystemContext()
-	} else {
-		sysCtx = opts.NewSystemContext()
 	}
 
+	// nolint: contextcheck
 	ctx, cancel := opts.CommandTimeoutContext()
 	defer cancel()
 
 	err = retry.IfNecessary(ctx, func() error {
 		_, err := imageRef.NewImageSource(ctx, sysCtx)
 		if err != nil {
-			return err
+			return fmt.Errorf("%w", err)
 		}
 		return nil
 	}, opts.RetryOpts)
 
+	// nolint: gocritic
 	if err == nil {
 		return true, nil
 	} else if strings.Contains(err.Error(), "manifest unknown") {
 		return false, nil
 	} else {
-		return false, err
+		return false, fmt.Errorf("%w", err)
 	}
 }
 
@@ -217,12 +211,12 @@ func Check(ctx context.Context, image string, opts *common.MirrorOptions, asCopy
 func (o MirrorController) Delete(ctx context.Context, image string, opts *common.MirrorOptions) error {
 
 	if err := ReexecIfNecessaryForImages([]string{image}...); err != nil {
-		return err
+		return fmt.Errorf("%w", err)
 	}
 
 	imageRef, err := alltransports.ParseImageName(image)
 	if err != nil {
-		return fmt.Errorf("invalid source name %s: %v", image, err)
+		return fmt.Errorf("invalid source name %s: %w", image, err)
 	}
 
 	sysCtx := opts.NewSystemContext()
@@ -231,11 +225,12 @@ func (o MirrorController) Delete(ctx context.Context, image string, opts *common
 		sysCtx.DockerInsecureSkipTLSVerify = types.OptionalBoolTrue
 	}
 
+	// nolint: wrapcheck
 	return retry.IfNecessary(ctx, func() error {
 
 		err := imageRef.DeleteImage(ctx, sysCtx)
 		if err != nil {
-			return err
+			return fmt.Errorf("%w", err)
 		}
 		return nil
 	}, opts.RetryOpts)
@@ -279,7 +274,7 @@ func NoteCloseFailure(err error, description string, closeErr error) error {
 		return fmt.Errorf("%s: %w", description, closeErr)
 	}
 	// In this case we prioritize the primary error for use with %w; closeErr is usually less relevant, or might be a consequence of the primary erorr.
-	return fmt.Errorf("%w (%s: %v)", err, description, closeErr)
+	return fmt.Errorf("%w (%s: %w)", err, description, closeErr)
 }
 
 // parseManifestFormat parses format parameter for copy and sync command.

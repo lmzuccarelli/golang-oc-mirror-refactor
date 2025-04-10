@@ -24,7 +24,8 @@ type PluggableLogger struct {
 }
 
 // New - returns a new PluggableLogger instance
-func New(level string) PluggableLoggerInterface {
+// nolint: ireturn
+func New(level string) *PluggableLogger {
 	return &PluggableLogger{Log: &simple.Logger{Level: level}}
 }
 

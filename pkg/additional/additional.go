@@ -1,7 +1,6 @@
 package additional
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -22,12 +21,10 @@ type CollectAdditional struct {
 	Log     clog.PluggableLoggerInterface
 	Options *common.MirrorOptions
 	Config  v2alpha1.ImageSetConfiguration
-	Context context.Context
 }
 
-func New(ctx context.Context, log clog.PluggableLoggerInterface, cfg v2alpha1.ImageSetConfiguration, opts *common.MirrorOptions) common.ImageCollectorInteface {
+func New(log clog.PluggableLoggerInterface, cfg v2alpha1.ImageSetConfiguration, opts *common.MirrorOptions) CollectAdditional {
 	return CollectAdditional{
-		Context: ctx,
 		Log:     log,
 		Options: opts,
 		Config:  cfg,
@@ -36,7 +33,7 @@ func New(ctx context.Context, log clog.PluggableLoggerInterface, cfg v2alpha1.Im
 
 func (o CollectAdditional) Collect() (v2alpha1.CollectorSchema, error) {
 
-	var allImages []v2alpha1.CopyImageSchema
+	allImages := []v2alpha1.CopyImageSchema{}
 	cs := v2alpha1.CollectorSchema{}
 
 	o.Log.Debug(collectorPrefix+"setting copy option MultiArch=%s when collecting releases image", o.Options.MultiArch)
@@ -49,6 +46,7 @@ func (o CollectAdditional) Collect() (v2alpha1.CollectorSchema, error) {
 			o.Log.Warn("%v : SKIPPING", err)
 			continue
 		}
+		// nolint: gocritic
 		if o.Options.IsMirrorToDisk() || o.Options.IsMirrorToMirror() {
 			tmpSrc = imgSpec.ReferenceWithTransport
 			origin = img.Name

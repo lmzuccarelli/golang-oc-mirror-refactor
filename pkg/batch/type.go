@@ -10,20 +10,14 @@ type ProgressStruct struct {
 }
 
 type StringMap map[string]string
-type onlyKeyMap map[string]struct{}
 
-type mirrorErrorSchema struct {
+type mirrorSchemaError struct {
 	image     v2alpha1.CopyImageSchema
 	err       error
 	operators map[string]struct{}
 	bundles   StringMap
 }
 
-func (e mirrorErrorSchema) Error() string {
+func (e mirrorSchemaError) Error() string {
 	return e.err.Error()
-}
-
-func (s onlyKeyMap) Has(key string) bool {
-	_, ok := s[key]
-	return ok
 }

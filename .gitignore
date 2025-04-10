@@ -2,3 +2,4 @@ build/
 refactor/
 *.log
 *.json
+tests/

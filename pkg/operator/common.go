@@ -17,6 +17,8 @@ import (
 	"github.com/operator-framework/operator-registry/alpha/declcfg"
 )
 
+const latest string = ":latest"
+
 var internalLog clog.PluggableLoggerInterface
 
 type catalogHandler struct {
@@ -40,10 +42,6 @@ type OperatorCatalog struct {
 	BundlesByPkgAndName map[string]map[string]declcfg.Bundle
 }
 
-type imageDispatcher interface {
-	dispatch(image v2alpha1.RelatedImage) ([]v2alpha1.CopyImageSchema, error)
-}
-
 type catalogHandlerInterface interface {
 	getDeclarativeConfig(filePath string) (*declcfg.DeclarativeConfig, error)
 	getCatalog(filePath string) (OperatorCatalog, error)
@@ -59,16 +57,6 @@ type Operator struct {
 	ctlgHandler        catalogHandlerInterface
 	generateV1DestTags bool
 }
-
-//func WithV1Tags(o CollectorInterface) CollectorInterface {
-//	switch impl := o.(type) {
-//	case *FilterCollector:
-//		impl.generateV1DestTags = true
-//	case *LocalStorageCollector:
-//		impl.generateV1DestTags = true
-//	}
-//	return o
-//}
 
 func (o Operator) destinationRegistry() string {
 	if o.Options.DestinationRegistry == "" {
@@ -93,7 +81,7 @@ func (o Operator) cachedCatalog(catalog v2alpha1.Operator, filteredTag string) (
 	var src string
 	srcImgSpec, err := image.ParseRef(catalog.Catalog)
 	if err != nil {
-		return "", fmt.Errorf("unable to determine cached reference for catalog %s: %v", catalog.Catalog, err)
+		return "", fmt.Errorf("unable to determine cached reference for catalog %s: %w", catalog.Catalog, err)
 	}
 
 	// prepare the src and dest references
@@ -118,7 +106,7 @@ func (o Operator) catalogDigest(ctx context.Context, catalog v2alpha1.Operator) 
 
 	srcImgSpec, err := image.ParseRef(catalog.Catalog)
 	if err != nil {
-		return "", fmt.Errorf("unable to determine cached reference for catalog %s: %v", catalog.Catalog, err)
+		return "", fmt.Errorf("unable to determine cached reference for catalog %s: %w", catalog.Catalog, err)
 	}
 
 	// prepare the src and dest references
@@ -137,7 +125,7 @@ func (o Operator) catalogDigest(ctx context.Context, catalog v2alpha1.Operator) 
 	case srcImgSpec.Tag == "" && srcImgSpec.Digest != "":
 		src = src + ":" + srcImgSpec.Algorithm + "-" + srcImgSpec.Digest
 	case srcImgSpec.Tag == "" && srcImgSpec.Digest == "" && srcImgSpec.Transport == ociProtocol:
-		src = src + ":latest"
+		src += latest
 	default:
 		src = src + ":" + srcImgSpec.Tag
 	}
@@ -145,7 +133,7 @@ func (o Operator) catalogDigest(ctx context.Context, catalog v2alpha1.Operator) 
 	imgSpec, err := image.ParseRef(src)
 	if err != nil {
 		o.Log.Error(errMsg, err.Error())
-		return "", err
+		return "", fmt.Errorf("%w", err)
 	}
 
 	sourceCtx := o.Options.NewSystemContext()
@@ -210,7 +198,7 @@ func (o Operator) prepareD2MCopyBatch(images map[string][]v2alpha1.RelatedImage)
 				} else {
 					src = src + ":" + imgSpec.Algorithm + "-" + imgSpec.Digest
 				}
-				//TODO remove me when the migration from oc-mirror v1 to v2 ends
+				// TODO remove me when the migration from oc-mirror v1 to v2 ends
 				if o.generateV1DestTags {
 					if img.OriginFromOperatorCatalogOnDisk {
 						dest = dest + ":" + imgSpec.Digest[0:6]
@@ -260,7 +248,9 @@ func (o Operator) prepareM2DCopyBatch(images map[string][]v2alpha1.RelatedImage)
 		for _, img := range relatedImgs {
 			var src string
 			var dest string
-			if img.Image == "" { // OCPBUGS-31622 skipping empty related images
+
+			// OCPBUGS-31622 skipping empty related images
+			if img.Image == "" {
 				continue
 			}
 			imgSpec, err := image.ParseRef(img.Image)
@@ -287,7 +277,7 @@ func (o Operator) prepareM2DCopyBatch(images map[string][]v2alpha1.RelatedImage)
 			case img.Type == v2alpha1.TypeOperatorCatalog && len(img.TargetTag) > 0:
 				dest = dest + ":" + img.TargetTag
 			case imgSpec.Tag == "" && imgSpec.Transport == ociProtocol:
-				dest = dest + "::latest"
+				dest += "::latest"
 			case imgSpec.IsImageByDigestOnly():
 				dest = dest + ":" + imgSpec.Algorithm + "-" + imgSpec.Digest
 			case imgSpec.IsImageByTagAndDigest(): // OCPBUGS-33196 + OCPBUGS-37867- check source image for tag and digest
@@ -329,6 +319,7 @@ func (o Operator) dispatchImagesForM2M(images map[string][]v2alpha1.RelatedImage
 			}
 			var copies []v2alpha1.CopyImageSchema
 			var err error
+			// nolint: exhaustive
 			switch img.Type {
 			case v2alpha1.TypeOperatorCatalog:
 				dispatcher := CatalogImageDispatcher{
@@ -367,7 +358,6 @@ func (o Operator) dispatchImagesForM2M(images map[string][]v2alpha1.RelatedImage
 }
 
 type OtherImageDispatcher struct {
-	imageDispatcher
 	log                 clog.PluggableLoggerInterface
 	destinationRegistry string
 	cacheRegistry       string
@@ -378,14 +368,14 @@ func (d OtherImageDispatcher) dispatch(img v2alpha1.RelatedImage) ([]v2alpha1.Co
 	copies := []v2alpha1.CopyImageSchema{}
 	imgSpec, err := image.ParseRef(img.Image)
 	if err != nil {
-		return copies, err
+		return copies, fmt.Errorf("%w", err)
 	}
 
 	src = imgSpec.ReferenceWithTransport
 	dest = strings.Join([]string{d.destinationRegistry, imgSpec.PathComponent}, "/")
 	switch {
 	case imgSpec.Tag == "" && imgSpec.Transport == ociProtocol:
-		dest = dest + ":latest"
+		dest += latest
 	case imgSpec.IsImageByDigestOnly():
 		dest = dest + ":" + imgSpec.Algorithm + "-" + imgSpec.Digest
 	case imgSpec.IsImageByTagAndDigest(): // OCPBUGS-33196 + OCPBUGS-37867- check source image for tag and digest
@@ -401,7 +391,6 @@ func (d OtherImageDispatcher) dispatch(img v2alpha1.RelatedImage) ([]v2alpha1.Co
 }
 
 type CatalogImageDispatcher struct {
-	imageDispatcher
 	log                 clog.PluggableLoggerInterface
 	destinationRegistry string
 	cacheRegistry       string
@@ -451,7 +440,7 @@ func saveCtlgToCacheRef(spec image.ImageSpec, img v2alpha1.RelatedImage, cacheRe
 	case len(img.TargetTag) > 0:
 		saveCtlgDest = saveCtlgDest + ":" + img.TargetTag
 	case spec.Tag == "" && spec.Transport == ociProtocol:
-		saveCtlgDest = saveCtlgDest + ":latest"
+		saveCtlgDest += latest
 	case spec.IsImageByDigestOnly():
 		saveCtlgDest = saveCtlgDest + ":" + spec.Algorithm + "-" + spec.Digest
 	case spec.IsImageByTagAndDigest():
@@ -484,7 +473,7 @@ func rebuiltCtlgRef(spec image.ImageSpec, img v2alpha1.RelatedImage, cacheRegist
 	case img.Type == v2alpha1.TypeOperatorCatalog && len(img.TargetTag) > 0:
 		rebuiltCtlgSrc = rebuiltCtlgSrc + ":" + img.TargetTag
 	case spec.Tag == "" && spec.Transport == ociProtocol:
-		rebuiltCtlgSrc = rebuiltCtlgSrc + ":latest"
+		rebuiltCtlgSrc += latest
 	case spec.IsImageByDigestOnly():
 		rebuiltCtlgSrc = rebuiltCtlgSrc + ":" + spec.Algorithm + "-" + spec.Digest
 	case spec.IsImageByTagAndDigest(): // OCPBUGS-33196 + OCPBUGS-37867- check source image for tag and digest
@@ -516,7 +505,7 @@ func destCtlgRef(spec image.ImageSpec, img v2alpha1.RelatedImage, destinationReg
 	case len(img.TargetTag) > 0:
 		dest = dest + ":" + img.TargetTag
 	case spec.Tag == "" && spec.Transport == ociProtocol:
-		dest = dest + ":latest"
+		dest += latest
 	case spec.IsImageByDigestOnly():
 		dest = dest + ":" + spec.Algorithm + "-" + spec.Digest
 	case spec.IsImageByTagAndDigest(): // OCPBUGS-33196 + OCPBUGS-37867- check source image for tag and digest

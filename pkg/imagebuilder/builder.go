@@ -57,17 +57,17 @@ type ImageBuilder struct {
 	Mode          string
 }
 
-// ErrInvalidReference is returned the target reference is a digest.
-type ErrInvalidReference struct {
+// InvalidReferenceError is returned the target reference is a digest.
+type InvalidReferenceError struct {
 	image string
 }
 
-func (e ErrInvalidReference) Error() string {
+func (e InvalidReferenceError) Error() string {
 	return fmt.Sprintf("target reference %q must have a tag reference", e.image)
 }
 
 // NewImageBuilder creates a new instance of an ImageBuilder.
-func NewBuilder(logger log.PluggableLoggerInterface, opts common.MirrorOptions) ImageBuilderInterface {
+func NewBuilder(logger log.PluggableLoggerInterface, opts common.MirrorOptions) *ImageBuilder {
 	// preparing name options for pulling the ubi9 image:
 	// - no need to set defaultRegistry because we are using a fully qualified image name
 	nameOptions := []name.Option{
@@ -118,7 +118,7 @@ func createInsecureRoundTripper() http.RoundTripper {
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
 		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: true,
+			InsecureSkipVerify: true, // #nosec G402
 			MinVersion:         tls.VersionTLS12,
 		},
 	}
@@ -147,29 +147,29 @@ func (b *ImageBuilder) BuildAndPush(ctx context.Context, targetRef string, layou
 	// due to computed hash differences.
 	targetIdx := strings.Index(targetRef, "@")
 	if targetIdx != -1 {
-		return "", &ErrInvalidReference{targetRef}
+		return "", &InvalidReferenceError{targetRef}
 	}
 
 	tag, err := name.NewTag(targetRef, b.NameOpts...)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%w", err)
 	}
 
 	idx, err := layoutPath.ImageIndex()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%w", err)
 	}
 	// make a copy of the original manifest for later
 	originalIdxManifest, err := idx.IndexManifest()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%w", err)
 	}
 	originalIdxManifest = originalIdxManifest.DeepCopy()
 
 	// process the image index for updates to images discovered along the way
 	resultIdx, err := b.ProcessImageIndex(ctx, idx, &v2format, cmd, targetRef, layers...)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%w", err)
 	}
 
 	// Ensure the index media type is a docker manifest list
@@ -185,12 +185,12 @@ func (b *ImageBuilder) BuildAndPush(ctx context.Context, targetRef string, layou
 	// write out the index, replacing the old value
 	err = layoutPath.ReplaceIndex(resultIdx, match.Digests(originalHashes...))
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%w", err)
 	}
 	// "Pull" the updated index
 	idx, err = layoutPath.ImageIndex()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%w", err)
 	}
 	// while it's entirely valid to have nested "manifest list" (i.e. an ImageIndex) within an OCI layout,
 	// this does NOT work for remote registries. So if we have those, then we need to get the nested
@@ -198,7 +198,7 @@ func (b *ImageBuilder) BuildAndPush(ctx context.Context, targetRef string, layou
 	// ImageIndexes, but in practice, there's only one level deep, and its a "singleton".
 	topLevelIndexManifest, err := idx.IndexManifest()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%w", err)
 	}
 	var imageIndexToPush v1.ImageIndex
 	for _, descriptor := range topLevelIndexManifest.Manifests {
@@ -211,7 +211,7 @@ func (b *ImageBuilder) BuildAndPush(ctx context.Context, targetRef string, layou
 			// if we find an image index, we can push that to the remote registry
 			imageIndexToPush, err = idx.ImageIndex(descriptor.Digest)
 			if err != nil {
-				return "", err
+				return "", fmt.Errorf("%w", err)
 			}
 			// we're not going to look any deeper or look for other indexes at this level
 			break
@@ -222,8 +222,9 @@ func (b *ImageBuilder) BuildAndPush(ctx context.Context, targetRef string, layou
 	pushErr := remote.WriteIndex(tag, imageIndexToPush, b.RemoteOpts...)
 	d, err := imageIndexToPush.Digest()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%w", err)
 	}
+	// nolint: wrapcheck
 	return d.Hex, pushErr
 
 }
@@ -249,25 +250,27 @@ func (b *ImageBuilder) BuildAndPush(ctx context.Context, targetRef string, layou
 // # Returns
 // • v1.ImageIndex: The resulting image index after processing has completed. Will be nil if an error occurs, otherwise non-nil.
 // • error: non-nil if an error occurs, nil otherwise
+// nolint: ireturn
 func (b *ImageBuilder) ProcessImageIndex(ctx context.Context, idx v1.ImageIndex, v2format *bool, cmd []string, targetRef string, layers ...v1.Layer) (v1.ImageIndex, error) {
 	var resultIdx v1.ImageIndex
 	resultIdx = idx
 	idxManifest, err := idx.IndexManifest()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w", err)
 	}
 	for _, manifest := range idxManifest.Manifests {
 		currentHash := *manifest.Digest.DeepCopy()
+		// nolint: exhaustive
 		switch manifest.MediaType {
 		case types.DockerManifestList, types.OCIImageIndex:
 			innerIdx, err := idx.ImageIndex(currentHash)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("%w", err)
 			}
 			// recursive call
 			processedIdx, err := b.ProcessImageIndex(ctx, innerIdx, v2format, cmd, targetRef, layers...)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("%w", err)
 			}
 			resultIdx = processedIdx
 			// making an assumption here that at any given point in the parent/child
@@ -283,7 +286,7 @@ func (b *ImageBuilder) ProcessImageIndex(ctx context.Context, idx v1.ImageIndex,
 
 		img, err := idx.Image(currentHash)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w", err)
 		}
 
 		// Add new layers to image.
@@ -300,14 +303,14 @@ func (b *ImageBuilder) ProcessImageIndex(ctx context.Context, idx v1.ImageIndex,
 		}
 		img, err = mutate.Append(img, additions...)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w", err)
 		}
 
 		if len(cmd) > 0 {
 			// Update image config
 			cfg, err := img.ConfigFile()
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("%w", err)
 			}
 			cfg.Config.Cmd = cmd
 			cfg.Author = "oc-mirror"
@@ -317,13 +320,13 @@ func (b *ImageBuilder) ProcessImageIndex(ctx context.Context, idx v1.ImageIndex,
 
 			img, err = mutate.Config(img, cfg.Config)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("%w", err)
 			}
 		}
 
 		desc, err := partial.Descriptor(img)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w", err)
 		}
 
 		// if the platform is not set, we need to attempt to do something about that
@@ -363,19 +366,21 @@ func (b *ImageBuilder) SaveImageLayoutToDir(ctx context.Context, imgRef string, 
 
 	ref, err := name.ParseReference(imgRef, b.NameOpts...)
 	if err != nil {
-		return "nil", err
+		return "nil", fmt.Errorf("%w", err)
 	}
 	idx, err := remote.Index(ref, b.RemoteOpts...)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%w", err)
 	}
+	// nolint: wrapcheck
 	return layout.Write(layoutDir, idx)
 }
 
+// nolint: ireturn
 func LayerFromGzipByteArray(content []byte, outputFile string, contentPrefixDir string, mod int, uid, gid int) (v1.Layer, error) {
 	gzipReader, err := gzip.NewReader(bytes.NewReader(content))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w", err)
 	}
 	defer gzipReader.Close()
 
@@ -383,7 +388,7 @@ func LayerFromGzipByteArray(content []byte, outputFile string, contentPrefixDir 
 
 	f, err := os.Create(outputFile)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w", err)
 	}
 	defer f.Close()
 
@@ -395,33 +400,36 @@ func LayerFromGzipByteArray(content []byte, outputFile string, contentPrefixDir 
 			break
 		}
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w", err)
 		}
+		// #nosec G305
 		header.Name = filepath.Join(contentPrefixDir, header.Name)
 		header.Uid = uid
 		header.Gid = gid
 
 		if err := tarWriter.WriteHeader(header); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w", err)
 		}
 
+		// #nosec G110
 		if _, err := io.Copy(tarWriter, tarReader); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w", err)
 		}
 	}
 
 	if err := tarWriter.Close(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w", err)
 	}
 
+	// #nosec G115
 	if err := os.Chmod(outputFile, os.FileMode(mod)); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w", err)
 	}
 
 	layerOptions := []tarball.LayerOption{}
 	layer, err := tarball.LayerFromFile(outputFile, layerOptions...)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w", err)
 	}
 	return layer, nil
 }

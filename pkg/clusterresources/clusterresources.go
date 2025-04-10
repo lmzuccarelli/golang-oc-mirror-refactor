@@ -12,6 +12,13 @@ import (
 	"strings"
 	"unicode"
 
+	confv1 "github.com/openshift/api/config/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/validation"
+	"sigs.k8s.io/yaml"
+
 	cm "github.com/lmzuccarelli/golang-oc-mirror-refactor/pkg/api/kubernetes/core"
 	ofv1 "github.com/lmzuccarelli/golang-oc-mirror-refactor/pkg/api/operator-framework/v1"
 	ofv1alpha1 "github.com/lmzuccarelli/golang-oc-mirror-refactor/pkg/api/operator-framework/v1alpha1"
@@ -21,12 +28,6 @@ import (
 	"github.com/lmzuccarelli/golang-oc-mirror-refactor/pkg/emoji"
 	"github.com/lmzuccarelli/golang-oc-mirror-refactor/pkg/image"
 	clog "github.com/lmzuccarelli/golang-oc-mirror-refactor/pkg/log"
-	confv1 "github.com/openshift/api/config/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/util/validation"
-	"sigs.k8s.io/yaml"
 )
 
 const (
@@ -40,7 +41,7 @@ const (
 	signatureNamespace                    = "openshift-config-managed"
 	configMapName                         = "mirrored-release-signatures"
 	signatureLabel                        = "release.openshift.io/verification-signatures"
-	signatureConfigMapMsg                 = "[GenerateSignatureConfigMap] %v"
+	signatureConfigMapMsg                 = "[GenerateSignatureConfigMap] %w"
 	signatureDir                          = "signatures"
 	hashTruncLen                   int    = 12
 )
@@ -56,7 +57,7 @@ type GeneratorInterface interface {
 func New(log clog.PluggableLoggerInterface,
 	cfg v2alpha1.ImageSetConfiguration,
 	opts *common.MirrorOptions,
-) GeneratorInterface {
+) *ClusterResourcesGenerator {
 	return &ClusterResourcesGenerator{Log: log, Config: cfg, Options: opts}
 }
 
@@ -95,25 +96,25 @@ func (o *ClusterResourcesGenerator) IDMS_ITMSGenerator(allRelatedImages []v2alph
 	// byDigestMirrors
 	byDigestMirrors, err := o.generateImageMirrors(allRelatedImages, DigestsOnlyMode, forceRepositoryScope)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w", err)
 	}
 
-	//byTagMirrors
+	// byTagMirrors
 	byTagMirrors, err := o.generateImageMirrors(allRelatedImages, TagsOnlyMode, forceRepositoryScope)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w", err)
 	}
 	// if byTagMirrors not empty
 	if len(byDigestMirrors) > 0 {
 		o.Log.Info(emoji.PageFacingUp + " Generating IDMS file...")
 		idmsList, err := o.generateIDMS(byDigestMirrors)
 		if err != nil {
-			return err
+			return fmt.Errorf("%w", err)
 		}
 
 		err = writeMirrorSet(idmsList, o.Options.WorkingDir, idmsFileName, o.Log)
 		if err != nil {
-			return err
+			return fmt.Errorf("%w", err)
 		}
 	} else {
 		o.Log.Info(emoji.PageFacingUp + " No images by digests were mirrored. Skipping IDMS generation.")
@@ -123,11 +124,11 @@ func (o *ClusterResourcesGenerator) IDMS_ITMSGenerator(allRelatedImages []v2alph
 		o.Log.Info(emoji.PageFacingUp + " Generating ITMS file...")
 		itmsList, err := o.generateITMS(byTagMirrors)
 		if err != nil {
-			return err
+			return fmt.Errorf("%w", err)
 		}
 		err = writeMirrorSet(itmsList, o.Options.WorkingDir, itmsFileName, o.Log)
 		if err != nil {
-			return err
+			return fmt.Errorf("%w", err)
 		}
 	} else {
 		o.Log.Info(emoji.PageFacingUp + " No images by tag were mirrored. Skipping ITMS generation.")
@@ -172,13 +173,13 @@ func writeMirrorSet[T confv1.ImageDigestMirrorSet | confv1.ImageTagMirrorSet](mi
 		unstructuredObj := unstructured.Unstructured{}
 		unstructuredObj.Object, err = runtime.DefaultUnstructuredConverter.ToUnstructured(&ms)
 		if err != nil {
-			return fmt.Errorf("error while sanitizing the catalogSource object prior to marshalling: %v", err)
+			return fmt.Errorf("error while sanitizing the catalogSource object prior to marshalling: %w", err)
 		}
 		delete(unstructuredObj.Object["metadata"].(map[string]interface{}), "creationTimestamp")
 
 		msBytes, err := yaml.Marshal(unstructuredObj.Object)
 		if err != nil {
-			return err
+			return fmt.Errorf("%w", err)
 		}
 		msAggregation = append(msAggregation, []byte("---\n")...)
 		msAggregation = append(msAggregation, msBytes...)
@@ -188,20 +189,20 @@ func writeMirrorSet[T confv1.ImageDigestMirrorSet | confv1.ImageTagMirrorSet](mi
 		log.Debug("%s does not exist, creating it", msFilePath)
 		err := os.MkdirAll(filepath.Dir(msFilePath), 0755)
 		if err != nil {
-			return err
+			return fmt.Errorf("%w", err)
 		}
 		log.Debug("%s dir created", filepath.Dir(msFilePath))
 	}
 	msFile, err := os.Create(msFilePath)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w", err)
 	}
 	log.Info("%s file created", msFilePath)
 
 	defer msFile.Close()
 
 	_, err = msFile.Write(msAggregation)
-	return err
+	return fmt.Errorf("%w", err)
 }
 
 func (o *ClusterResourcesGenerator) CatalogSourceGenerator(allRelatedImages []v2alpha1.CopyImageSchema) error {
@@ -224,7 +225,7 @@ func (o *ClusterResourcesGenerator) CatalogSourceGenerator(allRelatedImages []v2
 			template := o.getCSTemplate(copyImage.Origin)
 			err := o.generateCatalogSource(copyImage.Destination, template)
 			if err != nil {
-				return err
+				return fmt.Errorf("%w", err)
 			}
 		}
 	}
@@ -251,7 +252,7 @@ func (o *ClusterResourcesGenerator) ClusterCatalogGenerator(allRelatedImages []v
 		}
 		// TODO: add template support
 		if err := o.generateClusterCatalog(copyImage.Destination); err != nil {
-			return err
+			return fmt.Errorf("%w", err)
 		}
 	}
 	return nil
@@ -270,7 +271,7 @@ func (o *ClusterResourcesGenerator) generateCatalogSource(catalogRef string, cat
 
 	catalogSpec, err := image.ParseRef(catalogRef)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w", err)
 	}
 
 	var csSuffix string
@@ -297,7 +298,7 @@ func (o *ClusterResourcesGenerator) generateCatalogSource(catalogRef string, cat
 	catalogRepository := pathComponents[len(pathComponents)-1]
 	catalogSourceName := "cs-" + catalogRepository + "-" + csSuffix
 	// maybe needs some updating (i.e other unwanted characters !@# etc )
-	catalogSourceName = strings.Replace(catalogSourceName, ".", "-", -1)
+	catalogSourceName = strings.ReplaceAll(catalogSourceName, ".", "-")
 	errs := validation.IsDNS1035Label(catalogSourceName)
 	if len(errs) != 0 && !isValidRFC1123(catalogSourceName) {
 		return fmt.Errorf("error creating catalog source name: %s", strings.Join(errs, ", "))
@@ -309,7 +310,7 @@ func (o *ClusterResourcesGenerator) generateCatalogSource(catalogRef string, cat
 		obj, err = catalogSourceContentFromTemplate(catalogSourceTemplateFile, catalogSourceName, catalogSpec.Reference)
 		if err != nil {
 			generateWithoutTemplate = true
-			o.Log.Error("error generating catalog source from template. Fall back to generating catalog source without template: %v", err)
+			o.Log.Error("error generating catalog source from template. Fall back to generating catalog source without template: %w", err)
 		}
 	}
 	if generateWithoutTemplate || catalogSourceTemplateFile == "" {
@@ -333,13 +334,13 @@ func (o *ClusterResourcesGenerator) generateCatalogSource(catalogRef string, cat
 	unstructuredObj := unstructured.Unstructured{}
 	unstructuredObj.Object, err = runtime.DefaultUnstructuredConverter.ToUnstructured(&obj)
 	if err != nil {
-		return fmt.Errorf("error while sanitizing the catalogSource object prior to marshalling: %v", err)
+		return fmt.Errorf("error while sanitizing the catalogSource object prior to marshalling: %w", err)
 	}
 	delete(unstructuredObj.Object["metadata"].(map[string]interface{}), "creationTimestamp")
 
 	bytes, err := yaml.Marshal(unstructuredObj.Object)
 	if err != nil {
-		return fmt.Errorf("unable to marshal CatalogSource yaml: %v", err)
+		return fmt.Errorf("unable to marshal CatalogSource yaml: %w", err)
 	}
 
 	csFileName := filepath.Join(o.Options.WorkingDir, clusterResourcesDir, catalogSourceName+".yaml")
@@ -348,13 +349,13 @@ func (o *ClusterResourcesGenerator) generateCatalogSource(catalogRef string, cat
 		o.Log.Debug("%s does not exist, creating it", csFileName)
 		err := os.MkdirAll(filepath.Dir(csFileName), 0755)
 		if err != nil {
-			return err
+			return fmt.Errorf("%w", err)
 		}
 		o.Log.Debug("%s dir created", filepath.Dir(csFileName))
 	}
 	csFile, err := os.Create(csFileName)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w", err)
 	}
 
 	defer csFile.Close()
@@ -362,7 +363,7 @@ func (o *ClusterResourcesGenerator) generateCatalogSource(catalogRef string, cat
 	_, err = csFile.Write(bytes)
 	o.Log.Info("%s file created", csFileName)
 
-	return err
+	return fmt.Errorf("%w", err)
 }
 
 func catalogSourceContentFromTemplate(templateFile, catalogSourceName, image string) (ofv1alpha1.CatalogSource, error) {
@@ -370,18 +371,18 @@ func catalogSourceContentFromTemplate(templateFile, catalogSourceName, image str
 	var obj ofv1alpha1.CatalogSource
 	_, err := os.Stat(templateFile)
 	if os.IsNotExist(err) {
-		return obj, fmt.Errorf("error during CatalogSource generation using template: targetCatalogSourceTemplate does not exist: %s : %v", templateFile, err)
+		return obj, fmt.Errorf("error during CatalogSource generation using template: targetCatalogSourceTemplate does not exist: %s : %w", templateFile, err)
 	}
 	if err != nil {
-		return obj, fmt.Errorf("error during CatalogSource generation using template: error accessing targetCatalogSourceTemplate file %s: %v", templateFile, err)
+		return obj, fmt.Errorf("error during CatalogSource generation using template: error accessing targetCatalogSourceTemplate file %s: %w", templateFile, err)
 	}
 	bytesRead, err := os.ReadFile(templateFile)
 	if err != nil {
-		return obj, fmt.Errorf("error during CatalogSource generation using template: error reading targetCatalogSourceTemplate file %s: %v", templateFile, err)
+		return obj, fmt.Errorf("error during CatalogSource generation using template: error reading targetCatalogSourceTemplate file %s: %w", templateFile, err)
 	}
 	err = yaml.Unmarshal(bytesRead, &obj)
 	if err != nil {
-		return obj, fmt.Errorf("error during CatalogSource generation using template: %s is not a valid catalog source template and could not be unmarshaled: %v", templateFile, err)
+		return obj, fmt.Errorf("error during CatalogSource generation using template: %s is not a valid catalog source template and could not be unmarshaled: %w", templateFile, err)
 	}
 
 	// validate that the catalogSource is grpc, otherwise fail
@@ -403,10 +404,10 @@ func catalogSourceContentFromTemplate(templateFile, catalogSourceName, image str
 	obj.Spec.SourceType = "grpc"
 	obj.Spec.Image = image
 
-	//verify that the resulting obj is a valid CatalogSource object
+	// verify that the resulting obj is a valid CatalogSource object
 	_, err = yaml.Marshal(obj)
 	if err != nil {
-		return ofv1alpha1.CatalogSource{}, fmt.Errorf("error during CatalogSource generation using template: %v", err)
+		return ofv1alpha1.CatalogSource{}, fmt.Errorf("error during CatalogSource generation using template: %w", err)
 	}
 
 	return obj, nil
@@ -416,7 +417,7 @@ func catalogSourceContentFromTemplate(templateFile, catalogSourceName, image str
 func (o *ClusterResourcesGenerator) generateClusterCatalog(catalogRef string) error {
 	catalogSpec, err := image.ParseRef(catalogRef)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w", err)
 	}
 
 	var ccSuffix string
@@ -471,13 +472,13 @@ func (o *ClusterResourcesGenerator) generateClusterCatalog(catalogRef string) er
 	unstructuredObj := unstructured.Unstructured{}
 	unstructuredObj.Object, err = runtime.DefaultUnstructuredConverter.ToUnstructured(&obj)
 	if err != nil {
-		return fmt.Errorf("error while sanitizing the clusterCatalog object prior to marshalling: %v", err)
+		return fmt.Errorf("error while sanitizing the clusterCatalog object prior to marshalling: %w", err)
 	}
 	delete(unstructuredObj.Object["metadata"].(map[string]interface{}), "creationTimestamp")
 
 	bytes, err := yaml.Marshal(unstructuredObj.Object)
 	if err != nil {
-		return fmt.Errorf("unable to marshal ClusterCatalog yaml: %v", err)
+		return fmt.Errorf("unable to marshal ClusterCatalog yaml: %w", err)
 	}
 
 	ccFileName := filepath.Join(o.Options.WorkingDir, clusterResourcesDir, clusterCatalogName+".yaml")
@@ -485,13 +486,13 @@ func (o *ClusterResourcesGenerator) generateClusterCatalog(catalogRef string) er
 	if _, err := os.Stat(ccFileName); errors.Is(err, os.ErrNotExist) {
 		o.Log.Debug("%s does not exist, creating it", ccFileName)
 		if err := os.MkdirAll(filepath.Dir(ccFileName), 0755); err != nil {
-			return err
+			return fmt.Errorf("%w", err)
 		}
 		o.Log.Debug("%s dir created", filepath.Dir(ccFileName))
 	}
 	ccFile, err := os.Create(ccFileName)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w", err)
 	}
 
 	defer ccFile.Close()
@@ -499,7 +500,7 @@ func (o *ClusterResourcesGenerator) generateClusterCatalog(catalogRef string) er
 	_, err = ccFile.Write(bytes)
 	o.Log.Info("%s file created", ccFileName)
 
-	return err
+	return fmt.Errorf("%w", err)
 }
 
 func (o *ClusterResourcesGenerator) generateIDMS(mirrorsByCategory []categorizedMirrors) ([]confv1.ImageDigestMirrorSet, error) {
@@ -547,11 +548,11 @@ func (o *ClusterResourcesGenerator) generateImageMirrors(allRelatedImages []v2al
 		}
 		srcImgSpec, err := image.ParseRef(relatedImage.Origin)
 		if err != nil {
-			return nil, fmt.Errorf("unable to generate IDMS/ITMS: %v", err)
+			return nil, fmt.Errorf("unable to generate IDMS/ITMS: %w", err)
 		}
 		dstImgSpec, err := image.ParseRef(relatedImage.Destination)
 		if err != nil {
-			return nil, fmt.Errorf("unable to generate IDMS/ITMS: %v", err)
+			return nil, fmt.Errorf("unable to generate IDMS/ITMS: %w", err)
 		}
 		toBeAdded := true
 		switch mode {
@@ -617,13 +618,13 @@ func (o *ClusterResourcesGenerator) UpdateServiceGenerator(graphImageRef, releas
 	// according to https://docs.openshift.com/container-platform/4.14/updating/updating_a_cluster/updating_disconnected_cluster/disconnected-update-osus.html#update-service-create-service-cli_updating-restricted-network-cluster-osus
 	releaseImage, err := image.ParseRef(releaseImageRef)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w", err)
 	}
 	releaseImageName := releaseImage.Name
 
 	graphImage, err := image.ParseRef(graphImageRef)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w", err)
 	}
 
 	osus := updateservicev1.UpdateService{
@@ -644,7 +645,7 @@ func (o *ClusterResourcesGenerator) UpdateServiceGenerator(graphImageRef, releas
 	// put UpdateService in yaml
 	osusBytes, err := yaml.Marshal(osus)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w", err)
 	}
 	// creationTimestamp is a struct, omitempty does not apply
 	osusBytes = bytes.ReplaceAll(osusBytes, []byte("  creationTimestamp: null\n"), []byte(""))
@@ -656,20 +657,20 @@ func (o *ClusterResourcesGenerator) UpdateServiceGenerator(graphImageRef, releas
 		o.Log.Debug("%s does not exist, creating it", osusPath)
 		err := os.MkdirAll(filepath.Dir(osusPath), 0755)
 		if err != nil {
-			return err
+			return fmt.Errorf("%w", err)
 		}
 		o.Log.Debug("%s dir created", filepath.Dir(osusPath))
 	}
 	osusFile, err := os.Create(osusPath)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w", err)
 	}
 	o.Log.Info("%s file created", osusPath)
 
 	defer osusFile.Close()
 
 	_, err = osusFile.Write(osusBytes)
-	return err
+	return fmt.Errorf("%w", err)
 }
 
 func attemptNamespaceScope(srcImgSpec, dstImgSpec image.ImageSpec) (string, string) {
@@ -708,6 +709,7 @@ func (m mirrorCategory) toString() string {
 	}
 }
 
+// nolint: exhaustive
 func imageTypeToCategory(imageType v2alpha1.ImageType) mirrorCategory {
 	switch imageType {
 	case v2alpha1.TypeCincinnatiGraph:
@@ -802,10 +804,10 @@ func (o *ClusterResourcesGenerator) GenerateSignatureConfigMap(allRelatedImages 
 				}
 				// check if we have an entry already
 				found := false
-				for k, _ := range cm.BinaryData {
+				for k, v := range cm.BinaryData {
 					search := strings.Split(k, "-")
 					if len(search) != 3 {
-						o.Log.Warn("[GenerateSignatureConfigMap] configmap key seems to be malformed %s : ", k)
+						o.Log.Warn("[GenerateSignatureConfigMap] configmap key seems to be malformed %s : %v ", k, v)
 						continue
 					}
 					// duplicate check
@@ -835,6 +837,7 @@ func (o *ClusterResourcesGenerator) GenerateSignatureConfigMap(allRelatedImages 
 			return fmt.Errorf(signatureConfigMapMsg, err)
 		}
 		// write to cluster-resources directory
+		// #nosec G306
 		ferr := os.WriteFile(crPath+"/signature-configmap.json", jsonData, 0644)
 		if ferr != nil {
 			return fmt.Errorf(signatureConfigMapMsg, ferr)
@@ -844,6 +847,7 @@ func (o *ClusterResourcesGenerator) GenerateSignatureConfigMap(allRelatedImages 
 			return fmt.Errorf(signatureConfigMapMsg, err)
 		}
 		// write to cluster-resources directory
+		// #nosec G306
 		ferr = os.WriteFile(crPath+"/signature-configmap.yaml", yamlData, 0644)
 		if ferr != nil {
 			return fmt.Errorf(signatureConfigMapMsg, ferr)

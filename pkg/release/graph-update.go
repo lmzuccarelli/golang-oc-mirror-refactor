@@ -25,13 +25,10 @@ type GraphUpdate struct {
 	Log     clog.PluggableLoggerInterface
 	Options *common.MirrorOptions
 	Config  v2alpha1.ImageSetConfiguration
-	Context context.Context
-	//Mirror  mirror.MirrorInterface
 }
 
-func NewGraphUpdate(ctx context.Context, log clog.PluggableLoggerInterface, cfg v2alpha1.ImageSetConfiguration, opts *common.MirrorOptions) GraphUpdateInterface {
+func NewGraphUpdate(log clog.PluggableLoggerInterface, cfg v2alpha1.ImageSetConfiguration, opts *common.MirrorOptions) GraphUpdate {
 	return GraphUpdate{
-		Context: ctx,
 		Log:     log,
 		Config:  cfg,
 		Options: opts,
@@ -41,45 +38,47 @@ func NewGraphUpdate(ctx context.Context, log clog.PluggableLoggerInterface, cfg 
 // createGraphImage creates a graph image from the graph data
 // and returns the image reference.
 // it follows https://docs.openshift.com/container-platform/4.13/updating/updating-restricted-network-cluster/restricted-network-update-osus.html#update-service-graph-data_updating-restricted-network-cluster-osus
-func (o GraphUpdate) Create(url string) (string, error) {
+func (o *GraphUpdate) Create(url string) (string, error) {
 	if o.Config.Mirror.Platform.Graph {
-
-		image, err := o.graphImageInWorkingDir()
+		ctx := context.Background()
+		image, err := o.graphImageInWorkingDir(ctx)
 
 		// try download the graph data
 		if len(image) == 0 && err != nil && o.Options.IsMirrorToDisk() {
 			o.Log.Info(emoji.RepeatSingleButton + " building graph image")
 			// HTTP Get the graph updates from api endpoint
+			// #nosec G107
+			// nolint: noctx
 			resp, err := http.Get(url)
 			if err != nil {
-				return "", err
+				return "", fmt.Errorf("%w", err)
 			}
 			defer resp.Body.Close()
 
 			body, err := io.ReadAll(resp.Body)
 			if err != nil {
-				return "", err
+				return "", fmt.Errorf("%w", err)
 			}
 
 			// save graph data in a container layer modifying UID and GID to root.
 			archiveDestination := filepath.Join(o.Options.WorkingDir, graphArchive)
 			graphLayer, err := imagebuilder.LayerFromGzipByteArray(body, archiveDestination, buildGraphDataDir, 0644, 0, 0)
 			if err != nil {
-				return "", err
+				return "", fmt.Errorf("%w", err)
 			}
 			defer os.Remove(archiveDestination)
 
 			// Create a local directory for saving the OCI image layout of UBI9
 			layoutDir := filepath.Join(o.Options.WorkingDir, graphPreparationDir)
 			if err := os.MkdirAll(layoutDir, os.ModePerm); err != nil {
-				return "", err
+				return "", fmt.Errorf("%w", err)
 			}
 
 			// Use the imgBuilder to pull the ubi9 image to layoutDir
 			builder := imagebuilder.NewBuilder(o.Log, *o.Options)
-			layoutPath, err := builder.SaveImageLayoutToDir(o.Context, graphBaseImage, layoutDir)
+			layoutPath, err := builder.SaveImageLayoutToDir(ctx, graphBaseImage, layoutDir)
 			if err != nil {
-				return "", err
+				return "", fmt.Errorf("%w", err)
 			}
 
 			// preprare the CMD to []string{"/bin/bash", "-c", fmt.Sprintf("exec cp -rp %s/* %s", graphDataDir, graphDataMountPath)}
@@ -87,9 +86,9 @@ func (o GraphUpdate) Create(url string) (string, error) {
 
 			// update a ubi9 image with this new graphLayer and new cmd
 			graphImageRef := filepath.Join(o.destinationRegistry(), graphImageName) + ":latest"
-			_, err = builder.BuildAndPush(o.Context, graphImageRef, layoutPath, cmd, graphLayer)
+			_, err = builder.BuildAndPush(ctx, graphImageRef, layoutPath, cmd, graphLayer)
 			if err != nil {
-				return "", err
+				return "", fmt.Errorf("%w", err)
 			}
 			return dockerProtocol + graphImageRef, nil
 		}
@@ -99,9 +98,9 @@ func (o GraphUpdate) Create(url string) (string, error) {
 	return "", nil
 }
 
-func (o GraphUpdate) graphImageInWorkingDir() (string, error) {
+func (o *GraphUpdate) graphImageInWorkingDir(ctx context.Context) (string, error) {
 	var layoutDir string
-	fullPath, err := os.Getwd()
+	fullPath, _ := os.Getwd()
 	if strings.Contains(fullPath, o.Options.WorkingDir) {
 		layoutDir = filepath.Join(o.Options.WorkingDir, graphPreparationDir)
 	} else {
@@ -109,9 +108,9 @@ func (o GraphUpdate) graphImageInWorkingDir() (string, error) {
 	}
 	graphImageRef := ociProtocol + layoutDir
 
-	exists, err := o.imageExists(graphImageRef)
+	exists, err := o.imageExists(ctx, graphImageRef)
 	if err != nil {
-		return "", fmt.Errorf("no oci formatted graph image ready in cache: %v", err)
+		return "", fmt.Errorf("no oci formatted graph image ready in cache: %w", err)
 	}
 	if !exists {
 		return "", fmt.Errorf("no oci formatted graph image ready in cache")
@@ -119,9 +118,9 @@ func (o GraphUpdate) graphImageInWorkingDir() (string, error) {
 	return graphImageRef, nil
 }
 
-func (o GraphUpdate) imageExists(ref string) (bool, error) {
+func (o *GraphUpdate) imageExists(ctx context.Context, ref string) (bool, error) {
 	sourceCtx := o.Options.NewSystemContext()
-	digest, err := manifest.GetDigest(o.Context, sourceCtx, ref)
+	digest, err := manifest.GetDigest(ctx, sourceCtx, ref)
 	if err != nil {
 		return false, err
 	}

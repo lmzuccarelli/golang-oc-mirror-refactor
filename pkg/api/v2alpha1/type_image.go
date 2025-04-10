@@ -7,6 +7,7 @@ import (
 )
 
 // ImageType defines the content type for mirrored images
+// nolint: recvcheck
 type ImageType int
 
 const (
@@ -75,16 +76,18 @@ func (it ImageType) String() string {
 // MarshalJSON marshals the ImageType as a quoted json string
 func (it ImageType) MarshalJSON() ([]byte, error) {
 	if err := it.validate(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w", err)
 	}
+	// nolint: wrapcheck
 	return json.Marshal(it.String())
 }
 
 // UnmarshalJSON unmarshals a quoted json string to the ImageType
+// nolint: recvcheck
 func (it *ImageType) UnmarshalJSON(b []byte) error {
 	var j string
 	if err := json.Unmarshal(b, &j); err != nil {
-		return err
+		return fmt.Errorf("%w", err)
 	}
 
 	*it = imageStringsType[j]
@@ -95,6 +98,7 @@ func (it ImageType) validate() error {
 	if _, found := imageTypeStrings[it]; found {
 		return nil
 	}
+	// nolint: exhaustive
 	switch it {
 	case TypeInvalid:
 		// TypeInvalid is the default value for the concrete type, which means the field was not set.

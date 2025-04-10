@@ -4,9 +4,8 @@ import (
 	"fmt"
 
 	"github.com/Masterminds/semver/v3"
-	utilerrors "k8s.io/apimachinery/pkg/util/errors"
-
 	"github.com/lmzuccarelli/golang-oc-mirror-refactor/pkg/api/v2alpha1"
+	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 )
 
 type validationFunc func(cfg *v2alpha1.ImageSetConfiguration) []error
@@ -20,7 +19,7 @@ func Validate(cfg *v2alpha1.ImageSetConfiguration) error {
 	var errs []error
 	for _, check := range validationChecks {
 		if validationErrs := check(cfg); len(validationErrs) > 0 {
-			errs = append(errs, fmt.Errorf("invalid configuration: %v", utilerrors.NewAggregate(validationErrs)))
+			errs = append(errs, fmt.Errorf("invalid configuration: %w", utilerrors.NewAggregate(validationErrs)))
 		}
 	}
 	return utilerrors.NewAggregate(errs)
@@ -113,7 +112,7 @@ func ValidateDelete(cfg *v2alpha1.DeleteImageSetConfiguration) error {
 	var errs []error
 	for _, check := range validationDeleteChecks {
 		if err := check(cfg); err != nil {
-			errs = append(errs, fmt.Errorf("invalid configuration: %v", err))
+			errs = append(errs, fmt.Errorf("invalid configuration: %w", err))
 		}
 	}
 	return utilerrors.NewAggregate(errs)

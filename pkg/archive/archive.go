@@ -22,7 +22,7 @@ const (
 	cacheBlobsDir               = "docker/registry/v2/blobs"
 	cacheFilePrefix             = "docker/registry/v2"
 	workingDirectory            = "working-dir"
-	errMessageFolder            = "unable to create folder %s: %v"
+	errMessageFolder            = "unable to create folder %s: %w"
 	segMultiplier         int64 = 1024 * 1024 * 1024
 	defaultSegSize        int64 = 500
 	archiveFileNameFormat       = "%s_%06d.tar"
@@ -65,7 +65,7 @@ func NewPermissiveMirrorArchive(opts *common.MirrorOptions, log clog.PluggableLo
 	// create the history interface
 	history, err := history.NewHistory(opts.WorkingDir, opts.Since, log, history.OSFileCreator{})
 	if err != nil {
-		return &MirrorArchive{}, err
+		return &MirrorArchive{}, fmt.Errorf("%w", err)
 	}
 
 	bg := NewImageBlobGatherer(opts)
@@ -73,11 +73,11 @@ func NewPermissiveMirrorArchive(opts *common.MirrorOptions, log clog.PluggableLo
 	if maxSize == 0 {
 		maxSize = defaultSegSize
 	}
-	maxSize = maxSize * segMultiplier
+	maxSize *= segMultiplier
 
 	a, err := newPermissiveAdder(maxSize, opts.Destination, log)
 	if err != nil {
-		return &MirrorArchive{}, err
+		return &MirrorArchive{}, fmt.Errorf("%w", err)
 	}
 
 	ma := MirrorArchive{
@@ -104,34 +104,34 @@ func (o *MirrorArchive) BuildArchive(ctx context.Context, collectedImages []v2al
 	repositoriesDir := filepath.Join(o.cacheDir, cacheRepositoriesDir)
 	err := o.adder.addAllFolder(repositoriesDir, o.cacheDir)
 	if err != nil {
-		return fmt.Errorf("unable to add cache repositories to the archive : %v", err)
+		return fmt.Errorf("unable to add cache repositories to the archive : %w", err)
 	}
 	// 2- Add working-dir contents to archive
 	err = o.adder.addAllFolder(o.workingDir, filepath.Dir(o.workingDir))
 	if err != nil {
-		return fmt.Errorf("unable to add working-dir to the archive : %v", err)
+		return fmt.Errorf("unable to add working-dir to the archive : %w", err)
 	}
 	// 3 - Add imageSetConfig
 	iscName := imageSetConfigPrefix + time.Now().UTC().Format(time.RFC3339)
 	err = o.adder.addFile(o.iscPath, iscName)
 	if err != nil {
-		return fmt.Errorf("unable to add image set configuration to the archive : %v", err)
+		return fmt.Errorf("unable to add image set configuration to the archive : %w", err)
 	}
 	// 4 - Add blobs
 	blobsInHistory, err := o.history.Read()
 	if err != nil && !errors.Is(err, &history.EmptyHistoryError{}) {
-		return fmt.Errorf("unable to read history metadata from working-dir : %v", err)
+		return fmt.Errorf("unable to read history metadata from working-dir : %w", err)
 	}
 	// ignoring the error otherwise: continuing with an empty map in blobsInHistory
 
 	addedBlobs, err := o.addImagesDiff(ctx, collectedImages, blobsInHistory, o.cacheDir)
 	if err != nil {
-		return fmt.Errorf("unable to add image blobs to the archive : %v", err)
+		return fmt.Errorf("unable to add image blobs to the archive : %w", err)
 	}
-	//5 - update history file with addedBlobs
+	// 5 - update history file with addedBlobs
 	_, err = o.history.Append(addedBlobs)
 	if err != nil {
-		return fmt.Errorf("unable to update history metadata: %v", err)
+		return fmt.Errorf("unable to update history metadata: %w", err)
 	}
 
 	return nil
@@ -142,12 +142,12 @@ func (o *MirrorArchive) addImagesDiff(ctx context.Context, collectedImages []v2a
 	for _, img := range collectedImages {
 		imgBlobs, err := o.blobGatherer.GatherBlobs(ctx, img.Destination)
 		if err != nil {
-			return nil, fmt.Errorf("unable to find blobs corresponding to %s: %v", img.Destination, err)
+			return nil, fmt.Errorf("unable to find blobs corresponding to %s: %w", img.Destination, err)
 		}
 
 		addedBlobs, err := o.addBlobsDiff(imgBlobs, historyBlobs, allAddedBlobs)
 		if err != nil {
-			return nil, fmt.Errorf("unable to add blobs corresponding to %s: %v", img.Destination, err)
+			return nil, fmt.Errorf("unable to add blobs corresponding to %s: %w", img.Destination, err)
 		}
 
 		for hash, value := range addedBlobs {
@@ -169,12 +169,12 @@ func (o *MirrorArchive) addBlobsDiff(collectedBlobs, historyBlobs map[string]str
 			// Add to tar
 			d, err := digest.Parse(hash)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("%w", err)
 			}
 			blobPath := filepath.Join(o.cacheDir, cacheBlobsDir, d.Algorithm().String(), d.Encoded()[:2], d.Encoded())
 			err = o.adder.addAllFolder(blobPath, o.cacheDir)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("%w", err)
 			}
 			blobsInDiff[hash] = ""
 		}
@@ -182,17 +182,18 @@ func (o *MirrorArchive) addBlobsDiff(collectedBlobs, historyBlobs map[string]str
 	return blobsInDiff, nil
 }
 
+// nolint: unused
 func removePastArchives(destination string) error {
 	_, err := os.Stat(destination)
 	if err == nil {
 		files, err := filepath.Glob(filepath.Join(destination, "mirror_*.tar"))
 		if err != nil {
-			return err
+			return fmt.Errorf("%w", err)
 		}
 		for _, file := range files {
 			err := os.Remove(file)
 			if err != nil {
-				return err
+				return fmt.Errorf("%w", err)
 			}
 		}
 	}

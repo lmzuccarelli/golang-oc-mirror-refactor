@@ -25,12 +25,13 @@ func NewArchiveExtractor(archivePath, workingDir, cacheDir string) (MirrorUnArch
 	}
 	files, err := os.ReadDir(archivePath)
 	if err != nil {
-		return MirrorUnArchiver{}, err
+		return MirrorUnArchiver{}, fmt.Errorf("%w", err)
 	}
 
+	//nolint: gocritic
 	rxp, err := regexp.Compile(archiveFilePrefix + "_[0-9]{6}\\.tar")
 	if err != nil {
-		return MirrorUnArchiver{}, err
+		return MirrorUnArchiver{}, fmt.Errorf("%w", err)
 	}
 	for _, chunk := range files {
 
@@ -48,7 +49,7 @@ func (o MirrorUnArchiver) Unarchive() error {
 	for _, chunkPath := range o.archiveFiles {
 		chunkFile, err := os.Open(chunkPath)
 		if err != nil {
-			return err
+			return fmt.Errorf("%w", err)
 		}
 		defer chunkFile.Close()
 		reader := tar.NewReader(chunkFile)
@@ -71,7 +72,7 @@ func (o MirrorUnArchiver) Unarchive() error {
 			}
 
 			if err != nil {
-				return fmt.Errorf("error reading archive %s: %v", chunkFile.Name(), err)
+				return fmt.Errorf("error reading archive %s: %w", chunkFile.Name(), err)
 			}
 
 			if header == nil {
@@ -90,11 +91,14 @@ func (o MirrorUnArchiver) Unarchive() error {
 			if header.Typeflag == tar.TypeReg {
 				descriptor := ""
 				// case file belongs to working-dir
+				// nolint: gocritic
 				if strings.Contains(header.Name, workingDirectory) {
 					workingDirParent := filepath.Dir(o.workingDir)
+					// #nosec G305
 					descriptor = filepath.Join(workingDirParent, header.Name)
 				} else if strings.Contains(header.Name, cacheFilePrefix) {
 					// case file belongs to the cache
+					// #nosec G305
 					descriptor = filepath.Join(o.cacheDir, header.Name)
 				} else {
 					continue
@@ -106,13 +110,15 @@ func (o MirrorUnArchiver) Unarchive() error {
 				}
 				// if it's a file create it, making sure it's at least writable and executable by the user
 				// since with every UnArchive, we should be able to rewrite the file
+				// #nosec G115
 				f, err := os.OpenFile(descriptor, os.O_CREATE|os.O_RDWR, os.FileMode(header.Mode)|0755)
 				if err != nil {
-					return fmt.Errorf("unable to create file %s: %v", descriptor, err)
+					return fmt.Errorf("unable to create file %s: %w", descriptor, err)
 				}
 				// copy  contents
-				if _, err := io.Copy(f, reader); err != nil {
-					return fmt.Errorf("error copying file %s: %v", descriptor, err)
+				// #nosec G110
+				if _, err := io.Copy(f, reader); err != nil { // #nosec G115
+					return fmt.Errorf("error copying file %s: %w", descriptor, err)
 				}
 
 				// manually close here after each file operation; defering would cause each file close

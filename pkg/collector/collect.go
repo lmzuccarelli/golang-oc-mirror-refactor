@@ -1,8 +1,6 @@
 package collector
 
 import (
-	"context"
-
 	"github.com/lmzuccarelli/golang-oc-mirror-refactor/pkg/api/v2alpha1"
 	"github.com/lmzuccarelli/golang-oc-mirror-refactor/pkg/common"
 	clog "github.com/lmzuccarelli/golang-oc-mirror-refactor/pkg/log"
@@ -17,13 +15,12 @@ type CollectorManager struct {
 	Log     clog.PluggableLoggerInterface
 	Options *common.MirrorOptions
 	Config  v2alpha1.ImageSetConfiguration
-	Context context.Context
 }
 
 var collectors = []common.ImageCollectorInteface{}
 
-func New(ctx context.Context, log clog.PluggableLoggerInterface, cfg v2alpha1.ImageSetConfiguration, opts *common.MirrorOptions) CollectorManagerInterface {
-	collect := CollectorManager{Context: ctx, Log: log, Config: cfg, Options: opts}
+func New(log clog.PluggableLoggerInterface, cfg v2alpha1.ImageSetConfiguration, opts *common.MirrorOptions) CollectorManager {
+	collect := CollectorManager{Log: log, Config: cfg, Options: opts}
 	return collect
 }
 

@@ -45,7 +45,7 @@ type ChannelConcurrentBatch struct {
 }
 
 type GoroutineResult struct {
-	err     *mirrorErrorSchema
+	err     *mirrorSchemaError
 	imgType v2alpha1.ImageType
 	img     v2alpha1.CopyImageSchema
 }
@@ -55,12 +55,12 @@ func New(
 	logsDir string,
 	mirror mirror.MirrorInterface,
 	batchSize uint,
-) BatchInterface {
+) *ChannelConcurrentBatch {
 	return &ChannelConcurrentBatch{
 		Log:           log,
 		LogsDir:       logsDir,
 		Mirror:        mirror,
-		MaxGoroutines: int(batchSize),
+		MaxGoroutines: int(batchSize), // #nosec G115
 	}
 }
 
@@ -72,7 +72,7 @@ func (o *ChannelConcurrentBatch) Worker(ctx context.Context, collectorSchema v2a
 		AllImages: []v2alpha1.CopyImageSchema{},
 	}
 
-	var errArray []mirrorErrorSchema
+	var errArray []mirrorSchemaError
 
 	var m sync.RWMutex
 	var wg sync.WaitGroup
@@ -128,9 +128,10 @@ func (o *ChannelConcurrentBatch) Worker(ctx context.Context, collectorSchema v2a
 				m.Unlock()
 				if skip {
 					if reason != nil {
-						result.err = &mirrorErrorSchema{image: img, err: reason}
+						result.err = &mirrorSchemaError{image: img, err: reason}
 					}
 
+					// nolint: exhaustive
 					switch img.Type {
 					case v2alpha1.TypeOperatorBundle:
 						spinner.Abort(false)
@@ -152,12 +153,15 @@ func (o *ChannelConcurrentBatch) Worker(ctx context.Context, collectorSchema v2a
 						break loop
 					default:
 						if !triggered {
+							// nolint: ineffassign
 							triggered = true
 
 							timeoutCtx, _ := opts.CommandTimeoutContext()
 							if opts.IsCopy() {
+								// nolint: contextcheck
 								err = o.Mirror.Copy(timeoutCtx, img.Source, img.Destination, opts)
 							} else {
+								// nolint: contextcheck
 								err = o.Mirror.Delete(timeoutCtx, img.Destination, opts)
 							}
 
@@ -167,10 +171,10 @@ func (o *ChannelConcurrentBatch) Worker(ctx context.Context, collectorSchema v2a
 							case img.Type.IsOperator():
 								operators := collectorSchema.CopyImageSchemaMap.OperatorsByImage[img.Origin]
 								bundles := collectorSchema.CopyImageSchemaMap.BundlesByImage[img.Origin]
-								result.err = &mirrorErrorSchema{image: img, err: err, operators: operators, bundles: bundles}
+								result.err = &mirrorSchemaError{image: img, err: err, operators: operators, bundles: bundles}
 								spinner.Abort(false)
 							case img.Type.IsRelease() || img.Type.IsAdditionalImage() || img.Type.IsHelmImage():
-								result.err = &mirrorErrorSchema{image: img, err: err}
+								result.err = &mirrorSchemaError{image: img, err: err}
 								spinner.Abort(false)
 							}
 							results <- result
@@ -240,6 +244,7 @@ func hostNamespace(input string) string {
 	host := parsedURL.Host
 	pathSegments := strings.Split(strings.Trim(parsedURL.Path, "/"), "/")
 
+	// nolint: gocritic
 	if len(pathSegments) > 1 {
 		namespacePath := strings.Join(pathSegments[:len(pathSegments)-1], "/")
 		hostAndNamespace := path.Join(host, namespacePath) + "/"
@@ -369,6 +374,7 @@ func runOverallProgress(overallProgress *mpb.Bar, cancelCtx context.Context, pro
 }
 
 func incrementTotals(imgType v2alpha1.ImageType, copiedImages *v2alpha1.CollectorSchema) {
+	// nolint: exhaustive
 	switch imgType {
 	case v2alpha1.TypeCincinnatiGraph, v2alpha1.TypeOCPRelease, v2alpha1.TypeOCPReleaseContent:
 		copiedImages.TotalReleaseImages++
@@ -383,7 +389,7 @@ func incrementTotals(imgType v2alpha1.ImageType, copiedImages *v2alpha1.Collecto
 
 // shouldSkipImage helps determine whether the batch should perform the mirroring of the image
 // or if the image should be skipped.
-func shouldSkipImage(img v2alpha1.CopyImageSchema, opts *common.MirrorOptions, errArray []mirrorErrorSchema) (bool, error) {
+func shouldSkipImage(img v2alpha1.CopyImageSchema, opts *common.MirrorOptions, errArray []mirrorSchemaError) (bool, error) {
 	// In MirrorToMirror and MirrorToDisk, the release collector will generally build and push the graph image
 	// to the destination registry (disconnected registry or cache resp.)
 	// Therefore this image can be skipped.

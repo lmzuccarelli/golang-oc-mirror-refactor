@@ -57,13 +57,11 @@ type CollectRelease struct {
 	Log     clog.PluggableLoggerInterface
 	Options *common.MirrorOptions
 	Config  v2alpha1.ImageSetConfiguration
-	Context context.Context
 	Mirror  mirror.MirrorInterface
 }
 
-func New(ctx context.Context, log clog.PluggableLoggerInterface, mi mirror.MirrorInterface, cfg v2alpha1.ImageSetConfiguration, opts *common.MirrorOptions) common.ImageCollectorInteface {
+func New(log clog.PluggableLoggerInterface, mi mirror.MirrorInterface, cfg v2alpha1.ImageSetConfiguration, opts *common.MirrorOptions) CollectRelease {
 	return CollectRelease{
-		Context: ctx,
 		Log:     log,
 		Options: opts,
 		Config:  cfg,
@@ -78,10 +76,11 @@ func (o CollectRelease) Collect() (v2alpha1.CollectorSchema, error) {
 	var imageIndexDir string
 	cs := v2alpha1.CollectorSchema{}
 	if o.Options.IsMirrorToDisk() || o.Options.IsMirrorToMirror() {
+		ctx := context.Background()
 		for _, img := range o.Config.Mirror.Platform.Releases {
 			hld := strings.Split(img.Name, "/")
 			releaseRepoAndTag := hld[len(hld)-1]
-			imageIndexDir = strings.Replace(releaseRepoAndTag, ":", "/", -1)
+			imageIndexDir = strings.ReplaceAll(releaseRepoAndTag, ":", "/")
 			releaseTag := releaseRepoAndTag[strings.Index(releaseRepoAndTag, ":")+1:]
 			cacheDir := filepath.Join(o.Options.WorkingDir, releaseImageExtractDir, imageIndexDir)
 			dir := filepath.Join(o.Options.WorkingDir, releaseImageDir, imageIndexDir)
@@ -100,7 +99,7 @@ func (o CollectRelease) Collect() (v2alpha1.CollectorSchema, error) {
 					return cs, fmt.Errorf(errMsg, err.Error())
 				}
 
-				err = o.Mirror.Copy(o.Context, src, dest, o.Options)
+				err = o.Mirror.Copy(ctx, src, dest, o.Options)
 
 				if err != nil {
 					return cs, fmt.Errorf(errMsg, err.Error())
@@ -115,7 +114,7 @@ func (o CollectRelease) Collect() (v2alpha1.CollectorSchema, error) {
 				return cs, fmt.Errorf(errMsg, err.Error())
 			}
 
-			//read the link to the manifest
+			// read the link to the manifest
 			if len(oci.Manifests) == 0 {
 				return cs, fmt.Errorf(errMsg, "image index not found ")
 			}
@@ -157,7 +156,7 @@ func (o CollectRelease) Collect() (v2alpha1.CollectorSchema, error) {
 				}
 			}
 
-			//add the release image itself
+			// add the release image itself
 			allRelatedImages = append(allRelatedImages, v2alpha1.RelatedImage{Image: img.Name, Name: img.Name, Type: v2alpha1.TypeOCPRelease})
 			tmpAllImages, err := prepareM2DCopyBatch(allRelatedImages, o.Options, releaseTag)
 			if err != nil {
@@ -167,7 +166,7 @@ func (o CollectRelease) Collect() (v2alpha1.CollectorSchema, error) {
 		}
 
 		if o.Config.Mirror.Platform.Graph {
-			graphImage, err := handleGraphImage(o.Context, o.Options)
+			graphImage, err := handleGraphImage(ctx, o.Options)
 			if err != nil {
 				o.Log.Warn("could not process graph image - SKIPPING: %v", err)
 			} else if graphImage.Source != "" {
@@ -214,8 +213,7 @@ func (o CollectRelease) Collect() (v2alpha1.CollectorSchema, error) {
 			}
 
 			if o.Config.Mirror.Platform.KubeVirtContainer {
-				cacheDir := filepath.Join(releaseDir)
-				ki, err := getKubeVirtImage(cacheDir)
+				ki, err := getKubeVirtImage(releaseDir)
 				if err != nil {
 					o.Log.Warn("%v", err)
 				} else {
@@ -246,7 +244,7 @@ func (o CollectRelease) Collect() (v2alpha1.CollectorSchema, error) {
 			// In delete workflow, the graph image might have been mirrored with M2M, and the graph image might have
 			// therefore been pushed directly to the destination registry. It will not exist in the cache, and that should be ok.
 			// Nevertheless, in DiskToMirror, and as explained in OCPBUGS-38037, the graphInCache check is important
-			// because in enclave environment, the Cincinnati API may not have been called, so we rely on the existance of the
+			// because in enclave environment, the Cincinnati API may not have been called, so we rely on the existence of the
 			// graph image in the cache as a paliative.
 			// shouldProceed := graphInCache || opts.Mode == "delete"
 			// if err != nil && o.Options.Mode != "delete" {
@@ -267,9 +265,9 @@ func (o CollectRelease) Collect() (v2alpha1.CollectorSchema, error) {
 			if len(graphCopySlice) != 1 {
 				return cs, fmt.Errorf(collectorPrefix + "error while calculating the destination reference for the graph image")
 			}
-			//o.GraphDataImage = graphCopySlice[0].Destination
+			// o.GraphDataImage = graphCopySlice[0].Destination
 			allImages = append(allImages, graphCopySlice...)
-			//}
+			// }
 		}
 	}
 
@@ -292,7 +290,7 @@ func (o CollectRelease) Collect() (v2alpha1.CollectorSchema, error) {
 }
 
 func prepareM2DCopyBatch(images []v2alpha1.RelatedImage, opts *common.MirrorOptions, releaseTag string) ([]v2alpha1.CopyImageSchema, error) {
-	var result []v2alpha1.CopyImageSchema
+	result := []v2alpha1.CopyImageSchema{}
 	for _, img := range images {
 		var src string
 		var dest string
@@ -314,7 +312,7 @@ func prepareM2DCopyBatch(images []v2alpha1.RelatedImage, opts *common.MirrorOpti
 }
 
 func prepareD2MCopyBatch(images []v2alpha1.RelatedImage, opts *common.MirrorOptions, releaseTag string) ([]v2alpha1.CopyImageSchema, error) {
-	var result []v2alpha1.CopyImageSchema
+	result := []v2alpha1.CopyImageSchema{}
 	for _, img := range images {
 		var src string
 		var dest string
@@ -353,7 +351,7 @@ func GraphImage(opts common.MirrorOptions) (string, error) {
 		}
 		graphCopyImage, err := prepareD2MCopyBatch(graphRelatedImage, &opts, "")
 		if err != nil {
-			return "", fmt.Errorf("[release collector] could not establish the destination for the graph image: %v", err)
+			return "", fmt.Errorf("[release collector] could not establish the destination for the graph image: %w", err)
 		}
 		opts.GraphImage = graphCopyImage[0].Destination
 	}
@@ -370,14 +368,14 @@ func getKubeVirtImage(releaseArtifactsDir string) (v2alpha1.RelatedImage, error)
 	biFile := strings.Join([]string{releaseArtifactsDir, releaseBootableImagesFullPath}, "/")
 	file, err := os.ReadFile(biFile)
 	if err != nil {
-		return v2alpha1.RelatedImage{}, fmt.Errorf("reading kubevirt yaml file %v", err)
+		return v2alpha1.RelatedImage{}, fmt.Errorf("reading kubevirt yaml file %w", err)
 	}
 
 	errs := yaml.Unmarshal(file, &icm)
 	if errs != nil {
 		// this should not break the release process
 		// we just report the error and continue
-		return v2alpha1.RelatedImage{}, fmt.Errorf("marshalling kubevirt yaml file %v", errs)
+		return v2alpha1.RelatedImage{}, fmt.Errorf("marshalling kubevirt yaml file %w", errs)
 	}
 
 	// now parse the json section
@@ -385,7 +383,7 @@ func getKubeVirtImage(releaseArtifactsDir string) (v2alpha1.RelatedImage, error)
 	if errs != nil {
 		// this should not break the release process
 		// we just report the error and continue
-		return v2alpha1.RelatedImage{}, fmt.Errorf("parsing json from kubevirt configmap data %v", errs)
+		return v2alpha1.RelatedImage{}, fmt.Errorf("parsing json from kubevirt configmap data %w", errs)
 	}
 
 	image := ibi.Architectures.X86_64.Images.Kubevirt.DigestRef

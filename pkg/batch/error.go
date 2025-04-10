@@ -9,14 +9,14 @@ type SafeError struct {
 }
 
 type UnsafeError struct {
-	errSchema mirrorErrorSchema
+	errSchema mirrorSchemaError
 }
 
 func NewSafeError(format string, a ...any) error {
 	return SafeError{fmt.Sprintf(format, a...)}
 }
 
-func NewUnsafeError(mes mirrorErrorSchema) error {
+func NewUnsafeError(mes mirrorSchemaError) error {
 	return UnsafeError{mes}
 }
 

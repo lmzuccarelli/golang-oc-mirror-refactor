@@ -97,6 +97,7 @@ func ParseRef(imgRef string) (ImageSpec, error) {
 
 	if imgSpec.Transport == dockerProtocol {
 		imageNameComponents := strings.Split(imgSpec.Name, "/")
+		// nolint: gocritic
 		if len(imageNameComponents) >= 2 {
 			imgSpec.PathComponent = strings.Join(imageNameComponents[1:], "/")
 			imgSpec.Domain = imageNameComponents[0]

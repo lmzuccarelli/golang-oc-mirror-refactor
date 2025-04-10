@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -103,14 +102,21 @@ func Execute() error {
 			mainCmd.PrintDefaults()
 			os.Exit(0)
 		}
-		mainCmd.Parse(os.Args[1:])
-		log := clog.New(options.LogLevel)
-		ctx := context.Background()
-		startTime := time.Now()
-		controller := NewMirrorFlowController(ctx, log, &options)
-		err := controller.Process(mainCmd.Args())
+		err := mainCmd.Parse(os.Args[1:])
 		if err != nil {
-			log.Error("%v", err)
+			// TODO:consider creating a new log
+			// for now just print normally to console
+			fmt.Println("parsing command line args %w", err)
+			return fmt.Errorf("parsing command line args %w", err)
+		}
+		log := clog.New(options.LogLevel)
+		startTime := time.Now()
+		validate := MirrorValidate{Log: log}
+		setup := Setup{Log: log}
+		controller := NewMirrorFlowController(log, &options, validate, setup)
+		err = controller.Process(mainCmd.Args())
+		if err != nil {
+			log.Error(err.Error())
 			return err
 		}
 		endTime := time.Now()
@@ -126,14 +132,19 @@ func Execute() error {
 				os.Exit(0)
 			}
 		}
-		deleteCmd.Parse(os.Args[2:])
-		log := clog.New(options.LogLevel)
-		ctx := context.Background()
-		startTime := time.Now()
-		controller := NewDeleteFlowController(ctx, log, &options)
-		err := controller.Process(deleteCmd.Args())
+		err := deleteCmd.Parse(os.Args[2:])
 		if err != nil {
-			log.Error("%v", err)
+			fmt.Println("parsing delete command line args %w", err)
+			return nil
+		}
+		log := clog.New(options.LogLevel)
+		startTime := time.Now()
+		validate := DeleteValidate{Log: log}
+		setup := Setup{Log: log}
+		controller := NewDeleteFlowController(log, &options, validate, setup)
+		err = controller.Process(deleteCmd.Args())
+		if err != nil {
+			log.Error(err.Error())
 			return err
 		}
 		endTime := time.Now()

@@ -3,6 +3,7 @@ package history
 import (
 	"bufio"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
@@ -18,7 +19,6 @@ var log clog.PluggableLoggerInterface
 const (
 	historyPath       = ".history/"
 	historyNamePrefix = ".history-"
-	//historyFakePath   = common.TestFolder + ".history-fake/"
 )
 
 type History interface {
@@ -37,6 +37,7 @@ type history struct {
 	fileCreator FileCreator
 }
 
+// nolint: ireturn
 func NewHistory(workingDir string, before time.Time, logg clog.PluggableLoggerInterface, fileCreator FileCreator) (History, error) {
 	if logg == nil {
 		log = clog.New("error")
@@ -47,7 +48,7 @@ func NewHistory(workingDir string, before time.Time, logg clog.PluggableLoggerIn
 
 	err := os.MkdirAll(historyDir, 0755)
 	if err != nil {
-		return history{}, err
+		return history{}, fmt.Errorf("%w", err)
 	}
 	return history{
 		historyDir:  historyDir,
@@ -59,17 +60,17 @@ func NewHistory(workingDir string, before time.Time, logg clog.PluggableLoggerIn
 func (o history) Read() (map[string]string, error) {
 	historyMap := make(map[string]string)
 	historyFile, err := o.getHistoryFile(o.before)
-	//if err is of type EmptyHistoryError
+	// if err is of type EmptyHistoryError
 	// then return the erorr and an empty historyMap
 	if errors.Is(err, &EmptyHistoryError{}) {
 		return historyMap, err
 	} else if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w", err)
 	}
 
 	file, err := os.Open(historyFile)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w", err)
 	}
 	defer file.Close()
 
@@ -81,7 +82,7 @@ func (o history) Read() (map[string]string, error) {
 	}
 
 	if err := scanner.Err(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w", err)
 	}
 
 	return historyMap, nil
@@ -91,7 +92,7 @@ func (o history) getHistoryFile(before time.Time) (string, error) {
 	historyFilePath := ""
 	historyFiles, err := os.ReadDir(o.historyDir)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%w", err)
 	}
 
 	var latestFile fs.DirEntry
@@ -101,7 +102,7 @@ func (o history) getHistoryFile(before time.Time) (string, error) {
 		if isHistoryFile(historyFile) {
 			fileTime, err := getFileDate(historyFile)
 			if err != nil {
-				return "", err
+				return "", fmt.Errorf("%w", err)
 			}
 
 			if !before.IsZero() {
@@ -122,7 +123,7 @@ func (o history) getHistoryFile(before time.Time) (string, error) {
 	} else {
 		return "", EmptyHistoryErrorf("no history metadata found under %s", filepath.Dir(o.historyDir))
 	}
-	return historyFilePath, err
+	return historyFilePath, fmt.Errorf("%w", err)
 }
 
 func isHistoryFile(historyFile fs.DirEntry) bool {
@@ -134,9 +135,9 @@ func getFileDate(historyFile fs.DirEntry) (time.Time, error) {
 	dateTime, err := time.Parse(time.RFC3339, fileDate)
 	if err != nil {
 		log.Error("unable to parse time from filename %s: %s", historyFile.Name(), err.Error())
-		return time.Time{}, err
+		return time.Time{}, fmt.Errorf("%w", err)
 	}
-	return dateTime, err
+	return dateTime, fmt.Errorf("%w", err)
 }
 
 func (o history) Append(blobsToAppend map[string]string) (map[string]string, error) {
@@ -145,7 +146,7 @@ func (o history) Append(blobsToAppend map[string]string) (map[string]string, err
 
 	historyBlobs, err := o.Read()
 	if err != nil && !errors.Is(err, &EmptyHistoryError{}) {
-		return nil, err
+		return nil, fmt.Errorf("%w", err)
 	}
 
 	for k, v := range blobsToAppend {
@@ -154,7 +155,7 @@ func (o history) Append(blobsToAppend map[string]string) (map[string]string, err
 
 	file, err := o.fileCreator.Create(filename)
 	if err != nil {
-		return historyBlobs, err
+		return historyBlobs, fmt.Errorf("%w", err)
 	}
 	defer file.Close()
 
@@ -164,17 +165,17 @@ func (o history) Append(blobsToAppend map[string]string) (map[string]string, err
 		_, err := writer.WriteString(blob + "\n")
 		if err != nil {
 			log.Error("unable to write to history file: %s", err.Error())
-			return historyBlobs, err
+			return historyBlobs, fmt.Errorf("%w", err)
 		}
 	}
 
 	err = writer.Flush()
 	if err != nil {
 		log.Error("unable to flush history file: %s", err.Error())
-		return historyBlobs, err
+		return historyBlobs, fmt.Errorf("%w", err)
 	}
 
-	return historyBlobs, err
+	return historyBlobs, fmt.Errorf("%w", err)
 
 }
 
@@ -184,5 +185,5 @@ func (o history) newFileName() string {
 
 func (OSFileCreator) Create(filename string) (io.WriteCloser, error) {
 	file, err := os.Create(filename)
-	return file, err
+	return file, fmt.Errorf("%w", err)
 }

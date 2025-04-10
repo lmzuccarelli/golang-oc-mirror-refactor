@@ -10,6 +10,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/otiai10/copy"
+	"sigs.k8s.io/yaml"
+
 	"github.com/lmzuccarelli/golang-oc-mirror-refactor/pkg/api/v2alpha1"
 	"github.com/lmzuccarelli/golang-oc-mirror-refactor/pkg/archive"
 	"github.com/lmzuccarelli/golang-oc-mirror-refactor/pkg/batch"
@@ -17,10 +20,6 @@ import (
 	"github.com/lmzuccarelli/golang-oc-mirror-refactor/pkg/emoji"
 	"github.com/lmzuccarelli/golang-oc-mirror-refactor/pkg/image"
 	clog "github.com/lmzuccarelli/golang-oc-mirror-refactor/pkg/log"
-	//"github.com/lmzuccarelli/golang-oc-mirror-refactor/pkg/manifest"
-	//"github.com/lmzuccarelli/golang-oc-mirror-refactor/pkg/mirror"
-	"github.com/otiai10/copy"
-	"sigs.k8s.io/yaml"
 )
 
 // TODO:
@@ -60,7 +59,6 @@ type DeleteInterface interface {
 }
 
 type DeleteImages struct {
-	Context context.Context
 	Log     clog.PluggableLoggerInterface
 	Options *common.MirrorOptions
 	Batch   batch.BatchInterface
@@ -68,15 +66,14 @@ type DeleteImages struct {
 	Config  v2alpha1.DeleteImageSetConfiguration
 }
 
-func New(ctx context.Context,
+func New(
 	log clog.PluggableLoggerInterface,
 	opts *common.MirrorOptions,
 	batch batch.BatchInterface,
 	blobs archive.BlobsGatherer,
 	config v2alpha1.DeleteImageSetConfiguration,
-) DeleteInterface {
+) *DeleteImages {
 	return &DeleteImages{
-		Context: ctx,
 		Log:     log,
 		Options: opts,
 		Batch:   batch,
@@ -134,6 +131,7 @@ func (o DeleteImages) WriteDeleteMetaData(images []v2alpha1.CopyImageSchema) err
 	if err != nil {
 		o.Log.Error(deleteImagesErrMsg, err)
 	}
+	// #nosec G306
 	err = os.WriteFile(filename, ymlData, 0755)
 	if err != nil {
 		o.Log.Error(deleteImagesErrMsg, err)
@@ -180,6 +178,7 @@ func (o DeleteImages) DeleteRegistryImages(deleteImageList v2alpha1.DeleteImageL
 		}
 		assembleName := name[1] + "/" + imgSpecName.PathComponent
 		// check image type for release or release content
+		//nolint: exhaustive
 		switch img.Type {
 		case v2alpha1.TypeOCPReleaseContent:
 			assembleName = name[1] + "/openshift/release"
@@ -222,8 +221,8 @@ func (o DeleteImages) DeleteRegistryImages(deleteImageList v2alpha1.DeleteImageL
 
 	o.Options.Stdout = io.Discard
 	if !o.Options.DeleteGenerate && len(o.Options.DeleteDestination) > 0 {
-		if _, err := o.Batch.Worker(o.Context, collectorSchema, o.Options); err != nil {
-			return err
+		if _, err := o.Batch.Worker(context.Background(), collectorSchema, o.Options); err != nil {
+			return fmt.Errorf("%w", err)
 		}
 	}
 
@@ -252,12 +251,12 @@ func (o DeleteImages) ReadDeleteMetaData() (v2alpha1.DeleteImageList, error) {
 
 	data, err := os.ReadFile(fileName)
 	if err != nil {
-		return list, err
+		return list, fmt.Errorf("%w", err)
 	}
 	// lets parse the file to get the images
 	err = yaml.Unmarshal(data, &list)
 	if err != nil {
-		return list, err
+		return list, fmt.Errorf("%w", err)
 	}
 	return list, nil
 }

@@ -192,8 +192,8 @@ type RelatedImage struct {
 	// if set should be used when mirroring
 	TargetCatalog string `json:"targetCatalog"`
 	RebuiltTag    string `json:"rebuiltTag"`
-	//Used to identify if a related image is from an operator catalog on disk (oci:// on ImageSetConfiguration)
-	//TODO remove me when the migration from oc-mirror v1 to v2 ends
+	// Used to identify if a related image is from an operator catalog on disk (oci:// on ImageSetConfiguration)
+	// TODO remove me when the migration from oc-mirror v1 to v2 ends
 	OriginFromOperatorCatalogOnDisk bool
 }
 
@@ -208,8 +208,8 @@ type CollectorSchema struct {
 }
 
 type CopyImageSchemaMap struct {
-	OperatorsByImage map[string]map[string]struct{} //key is the origin image name and value is an array of operators' name
-	BundlesByImage   map[string]map[string]string   //key is the image name and value is the bundle name
+	OperatorsByImage map[string]map[string]struct{} // key is the origin image name and value is an array of operators' name
+	BundlesByImage   map[string]map[string]string   // key is the image name and value is the bundle name
 }
 
 // CopyImageSchema

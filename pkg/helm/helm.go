@@ -2,7 +2,6 @@ package helm
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -11,10 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/lmzuccarelli/golang-oc-mirror-refactor/pkg/api/v2alpha1"
-	"github.com/lmzuccarelli/golang-oc-mirror-refactor/pkg/common"
-	"github.com/lmzuccarelli/golang-oc-mirror-refactor/pkg/image"
-	clog "github.com/lmzuccarelli/golang-oc-mirror-refactor/pkg/log"
 	helmchart "helm.sh/helm/v3/pkg/chart"
 	"helm.sh/helm/v3/pkg/chart/loader"
 	"helm.sh/helm/v3/pkg/chartutil"
@@ -26,6 +21,11 @@ import (
 	helmrepo "helm.sh/helm/v3/pkg/repo"
 	"k8s.io/client-go/util/jsonpath"
 	"sigs.k8s.io/yaml"
+
+	"github.com/lmzuccarelli/golang-oc-mirror-refactor/pkg/api/v2alpha1"
+	"github.com/lmzuccarelli/golang-oc-mirror-refactor/pkg/common"
+	"github.com/lmzuccarelli/golang-oc-mirror-refactor/pkg/image"
+	clog "github.com/lmzuccarelli/golang-oc-mirror-refactor/pkg/log"
 )
 
 const (
@@ -42,12 +42,10 @@ type CollectHelm struct {
 	Log     clog.PluggableLoggerInterface
 	Config  v2alpha1.ImageSetConfiguration
 	Options *common.MirrorOptions
-	Context context.Context
 }
 
-func New(ctx context.Context, log clog.PluggableLoggerInterface, cfg v2alpha1.ImageSetConfiguration, opts *common.MirrorOptions) common.ImageCollectorInteface {
+func New(log clog.PluggableLoggerInterface, cfg v2alpha1.ImageSetConfiguration, opts *common.MirrorOptions) CollectHelm {
 	return CollectHelm{
-		Context: ctx,
 		Log:     log,
 		Options: opts,
 		Config:  cfg,
@@ -188,7 +186,7 @@ func createTempFile(log clog.PluggableLoggerInterface, dir string) (func(), stri
 		if err := os.Remove(file.Name()); err != nil {
 			log.Error("%s", err.Error())
 		}
-	}, file.Name(), err
+	}, file.Name(), fmt.Errorf("%w", err)
 }
 
 func getHelmImagesFromLocalChart(cfg v2alpha1.ImageSetConfiguration) ([]v2alpha1.RelatedImage, []error) {
@@ -217,12 +215,14 @@ func repoAdd(log clog.PluggableLoggerInterface, chartRepo v2alpha1.Repository, d
 
 	b, err := os.ReadFile(dir)
 	if err != nil && !os.IsNotExist(err) {
-		return err
+		return fmt.Errorf("%w", err)
+
 	}
 
 	var helmFile helmrepo.File
 	if err := yaml.Unmarshal(b, &helmFile); err != nil {
-		return err
+		return fmt.Errorf("%w", err)
+
 	}
 
 	// Check for existing repo name
@@ -233,18 +233,19 @@ func repoAdd(log clog.PluggableLoggerInterface, chartRepo v2alpha1.Repository, d
 
 	indexDownloader, err := helmrepo.NewChartRepository(&entry, getter.All(&helmcli.EnvSettings{}))
 	if err != nil {
-		return err
+		return fmt.Errorf("%w", err)
+
 	}
 
 	if _, err := indexDownloader.DownloadIndexFile(); err != nil {
-		return fmt.Errorf("invalid chart repository %q: %v", chartRepo.URL, err)
+		return fmt.Errorf("invalid chart repository %q: %w", chartRepo.URL, err)
 	}
 
 	// Update temp file with chart entry
 	helmFile.Update(&entry)
 
 	if err := helmFile.WriteFile(dir, 0644); err != nil {
-		return fmt.Errorf("error writing helm repo file: %v", err)
+		return fmt.Errorf("error writing helm repo file: %w", err)
 	}
 	return nil
 }
@@ -254,20 +255,26 @@ func createIndexFile(indexURL string, opts common.MirrorOptions) (helmrepo.Index
 	if !strings.HasSuffix(indexURL, "/index.yaml") {
 		indexURL += "index.yaml"
 	}
+	// #nosec G107
+	// nolint: noctx
 	resp, err := http.Get(indexURL)
 	if err != nil {
-		return indexFile, err
+		return indexFile, fmt.Errorf("%w", err)
+
 	}
 	if resp.StatusCode != 200 {
 		return indexFile, fmt.Errorf("response for %v returned %v with status code %v", indexURL, resp, resp.StatusCode)
 	}
+	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return indexFile, err
+		return indexFile, fmt.Errorf("%w", err)
+
 	}
 	err = yaml.Unmarshal(body, &indexFile)
 	if err != nil {
-		return indexFile, err
+		return indexFile, fmt.Errorf("%w", err)
+
 	}
 
 	namespace := getNamespaceFromURL(indexURL)
@@ -277,7 +284,8 @@ func createIndexFile(indexURL string, opts common.MirrorOptions) (helmrepo.Index
 	err = os.MkdirAll(indexDir, 0755)
 
 	if err != nil {
-		return indexFile, err
+		return indexFile, fmt.Errorf("%w", err)
+
 	}
 
 	indexFilePath := filepath.Join(indexDir, "index.yaml")
@@ -304,12 +312,14 @@ func getChartsFromIndex(indexURL string, indexFile helmrepo.IndexFile, opts comm
 
 		data, err := os.ReadFile(indexFilePath)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w", err)
+
 		}
 
 		err = yaml.Unmarshal(data, &indexFile)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w", err)
+
 		}
 	}
 
@@ -325,26 +335,27 @@ func getChartsFromIndex(indexURL string, indexFile helmrepo.IndexFile, opts comm
 
 func getImages(path string, imagePaths ...string) (images []v2alpha1.RelatedImage, err error) {
 
-	//lsc.Log.Debug("Reading from path %s", path)
-
 	p := getImagesPath(imagePaths...)
 
 	var chart *helmchart.Chart
 	if chart, err = loader.Load(path); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w", err)
+
 	}
 
 	var templates string
 	if templates, err = getHelmTemplates(chart); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w", err)
+
 	}
 
-	// Process each YAML document seperately
+	// Process each YAML document separately
 	for _, templateData := range bytes.Split([]byte(templates), []byte("\n---\n")) {
 		imgs, err := findImages(templateData, p...)
 
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w", err)
+
 		}
 
 		images = append(images, imgs...)
@@ -373,12 +384,12 @@ func getHelmTemplates(ch *helmchart.Chart) (string, error) {
 
 	valuesToRender, err := chartutil.ToRenderValues(ch, valueOpts, chartutil.ReleaseOptions{}, caps)
 	if err != nil {
-		return "", fmt.Errorf("error rendering values: %v", err)
+		return "", fmt.Errorf("error rendering values: %w", err)
 	}
 
 	files, err := engine.Render(ch, valuesToRender)
 	if err != nil {
-		return "", fmt.Errorf("error rendering chart %s: %v", ch.Name(), err)
+		return "", fmt.Errorf("error rendering chart %s: %w", ch.Name(), err)
 	}
 
 	// Skip the NOTES.txt files
@@ -389,7 +400,7 @@ func getHelmTemplates(ch *helmchart.Chart) (string, error) {
 	}
 
 	for _, crd := range ch.CRDObjects() {
-		fmt.Fprintf(out, "---\n# Source: %s\n%s\n", crd.Name, string(crd.File.Data[:]))
+		fmt.Fprintf(out, "---\n# Source: %s\n%s\n", crd.Name, string(crd.File.Data))
 	}
 
 	_, manifests, err := releaseutil.SortManifests(files, caps.APIVersions, releaseutil.InstallOrder)
@@ -402,7 +413,8 @@ func getHelmTemplates(ch *helmchart.Chart) (string, error) {
 			}
 			fmt.Fprintf(out, "---\n# Source: %s\n%s\n", name, content)
 		}
-		return out.String(), err
+		return out.String(), fmt.Errorf("%w", err)
+
 	}
 	for _, m := range manifests {
 		fmt.Fprintf(out, "---\n# Source: %s\n%s\n", m.Name, m.Content)
@@ -415,7 +427,8 @@ func findImages(templateData []byte, paths ...string) (images []v2alpha1.Related
 
 	var data interface{}
 	if err := yaml.Unmarshal(templateData, &data); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w", err)
+
 	}
 
 	j := jsonpath.New("")
@@ -424,11 +437,11 @@ func findImages(templateData []byte, paths ...string) (images []v2alpha1.Related
 	for _, path := range paths {
 		results, err := parseJSONPath(data, j, path)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w", err)
+
 		}
 
 		for _, result := range results {
-			//lsc.Log.Debug("Found image %s", result)
 			img := v2alpha1.RelatedImage{
 				Image: result,
 				Type:  v2alpha1.TypeHelmImage,
@@ -445,10 +458,10 @@ func findImages(templateData []byte, paths ...string) (images []v2alpha1.Related
 func parseJSONPath(input interface{}, parser *jsonpath.JSONPath, template string) ([]string, error) {
 	buf := new(bytes.Buffer)
 	if err := parser.Parse(template); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w", err)
 	}
 	if err := parser.Execute(buf, input); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w", err)
 	}
 
 	f := func(s rune) bool { return s == ' ' }
@@ -457,15 +470,14 @@ func parseJSONPath(input interface{}, parser *jsonpath.JSONPath, template string
 }
 
 func prepareM2DCopyBatch(images []v2alpha1.RelatedImage, opts common.MirrorOptions) ([]v2alpha1.CopyImageSchema, error) {
-	var result []v2alpha1.CopyImageSchema
+	result := []v2alpha1.CopyImageSchema{}
 	for _, img := range images {
 		var src string
 		var dest string
 
 		imgSpec, err := image.ParseRef(img.Image)
 		if err != nil {
-			//lsc.Log.Error("%s", err.Error())
-			return nil, err
+			return nil, fmt.Errorf("%w", err)
 		}
 		src = imgSpec.ReferenceWithTransport
 
@@ -479,23 +491,20 @@ func prepareM2DCopyBatch(images []v2alpha1.RelatedImage, opts common.MirrorOptio
 			dest = dockerProtocol + strings.Join([]string{destinationRegistry(opts), imgSpec.PathComponent + ":" + imgSpec.Tag}, "/")
 		}
 
-		//lsc.Log.Debug("source %s", src)
-		//lsc.Log.Debug("destination %s", dest)
 		result = append(result, v2alpha1.CopyImageSchema{Origin: img.Image, Source: src, Destination: dest, Type: img.Type})
 	}
 	return result, nil
 }
 
 func prepareD2MCopyBatch(images []v2alpha1.RelatedImage, opts *common.MirrorOptions) ([]v2alpha1.CopyImageSchema, error) {
-	var result []v2alpha1.CopyImageSchema
+	result := []v2alpha1.CopyImageSchema{}
 	for _, img := range images {
 		var src string
 		var dest string
 
 		imgSpec, err := image.ParseRef(img.Image)
 		if err != nil {
-			//lsc.Log.Error("%s", err.Error())
-			return nil, err
+			return nil, fmt.Errorf("%w", err)
 		}
 		if imgSpec.IsImageByDigestOnly() {
 			tag := fmt.Sprintf("%s-%s", imgSpec.Algorithm, imgSpec.Digest)
@@ -516,8 +525,6 @@ func prepareD2MCopyBatch(images []v2alpha1.RelatedImage, opts *common.MirrorOpti
 			return result, fmt.Errorf("unable to determine src %s or dst %s for %s", src, dest, img.Name)
 		}
 
-		//lsc.Log.Debug("source %s", src)
-		//lsc.Log.Debug("destination %s", dest)
 		result = append(result, v2alpha1.CopyImageSchema{Origin: img.Image, Source: src, Destination: dest, Type: img.Type})
 
 	}

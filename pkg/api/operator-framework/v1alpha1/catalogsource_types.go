@@ -187,7 +187,7 @@ func (u *UpdateStrategy) UnmarshalJSON(data []byte) (err error) {
 	}
 	us := alias{}
 	if err = json.Unmarshal(data, &us); err != nil {
-		return err
+		return fmt.Errorf("%w", err)
 	}
 	registryPoll := &RegistryPoll{
 		RawInterval: us.RegistryPoll.RawInterval,
